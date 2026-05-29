@@ -1,29 +1,40 @@
 ---
-title: "BrowserlessProvider: Headless Browser via Docker"
+title: "Browserless Provider — Remote Headless Chrome | GitResolve"
 sidebarTitle: "Browserless"
-description: "BrowserlessProvider delegates JS rendering to a Browserless Docker container — no local browser binary needed, ideal for server environments and CI/CD."
+description: "BrowserlessProvider delegates JavaScript rendering to a Browserless Docker container over REST, with no local Chromium binary required."
 ---
 
-`BrowserlessProvider` delivers the same full JavaScript rendering as `PuppeteerProvider` — rendered SPAs, dynamic content, client-side routing — but offloads all browser execution to a separate [Browserless](https://www.browserless.io) Docker container. Because the headless Chromium binary lives in the container rather than your application, you get complete JS rendering without adding a heavy native dependency to your deployment image. This makes `BrowserlessProvider` the preferred choice for production API servers, container-based CI/CD pipelines, and any environment where a local Puppeteer binary is impractical or prohibited.
+`BrowserlessProvider` offloads page rendering to a running [Browserless](https://www.browserless.io) instance over its REST API. Instead of managing a local Chromium process, GitResolve sends a `POST /content` request to the Browserless server and receives back the fully rendered HTML. The provider itself is entirely stateless — there is no browser lifecycle to manage, no process to terminate, and `cleanup()` is a no-op.
 
-## When to Use
+## When to use
 
-- **Production servers** — keep your application image lean by running Chromium in a dedicated sidecar container
-- **CI/CD pipelines** — spin up the Browserless container as a service alongside your test or build job
-- **Restricted environments** — platforms that block native binary execution but allow outbound HTTP calls to a local service
-- **Teams sharing infrastructure** — run a single Browserless instance that multiple GitResolve workers connect to concurrently
+- **Production servers** where installing a full browser binary is undesirable or against policy
+- **CI/CD pipelines** that run Browserless as a sidecar container alongside your test runner
+- **Restricted environments** such as read-only filesystems or minimal base images that cannot host a Chromium install
+- **Shared rendering infrastructure** where a single Browserless instance serves multiple GitResolve workers
 
-## Docker Setup
+## Docker setup
 
-Start the Browserless container before running GitResolve:
+Start a Browserless container before running GitResolve:
 
 ```bash
-docker run -d --name browserless -p 3000:3000 ghcr.io/browserless/chromium
+docker run -d \
+  --name browserless \
+  -p 3000:3000 \
+  ghcr.io/browserless/chromium
 ```
 
-<Info>
-  The container exposes port `3000` by default. Change the host port mapping (e.g., `-p 8080:3000`) and update `BROWSERLESS_URL` accordingly if port `3000` is already in use on your host.
-</Info>
+The container exposes its REST API on port 3000 by default. GitResolve will connect to `http://localhost:3000` unless you specify a different address.
+
+## Configuration
+
+`BrowserlessProvider` resolves its base URL from three sources, checked in this order:
+
+| Source | Example |
+|---|---|
+| Constructor argument | `new BrowserlessProvider('http://browserless:3000')` |
+| `BROWSERLESS_URL` environment variable | `export BROWSERLESS_URL=http://browserless:3000` |
+| Default | `http://localhost:3000` |
 
 ## Usage
 
@@ -32,79 +43,70 @@ docker run -d --name browserless -p 3000:3000 ghcr.io/browserless/chromium
 ```typescript
 import { BrowserlessProvider } from '@clyrisai/gitresolve';
 
-// Pass the base URL explicitly
-const provider = new BrowserlessProvider('http://localhost:3000');
-
-// Or rely on the BROWSERLESS_URL environment variable
+// Uses BROWSERLESS_URL env var or falls back to http://localhost:3000
 const provider = new BrowserlessProvider();
 
-const result = await scrapePortfolio('https://janedoe.dev', provider);
-await provider.cleanup(); // no-op — stateless REST, nothing to release
+const html = await provider.getPageContent('https://github.com/torvalds');
+console.log(html.slice(0, 500));
+
+// cleanup() is a no-op — safe to call, but nothing happens
+await provider.cleanup();
 ```
 
-### Via factory
+Pass an explicit URL to target a non-default instance:
+
+```typescript
+const provider = new BrowserlessProvider('http://browserless.internal:3000');
+const html = await provider.getPageContent('https://gitlab.com/someone');
+```
+
+### Via the factory
 
 ```typescript
 import { createProvider } from '@clyrisai/gitresolve';
 
+// BROWSERLESS_URL must be set, or browserless must be reachable at localhost:3000
 const provider = await createProvider('browserless');
+const html = await provider.getPageContent('https://bitbucket.org/someone');
 ```
 
-### Via CLI
+### CLI
 
 ```bash
-gitresolve --provider browserless --browserless-url http://localhost:3000 https://janedoe.dev
+gitresolve resolve resume.pdf --provider browserless --browserless-url http://browserless:3000
 ```
 
-<Tip>
-  Set the `BROWSERLESS_URL` environment variable to avoid passing `--browserless-url` on every CLI invocation:
-
-  ```bash
-  export BROWSERLESS_URL=http://browserless:3000
-  gitresolve --provider browserless https://janedoe.dev
-  ```
-
-  This is especially useful in Docker Compose setups where the container is reachable by service name rather than `localhost`.
-</Tip>
-
-## Configuration
-
-| Source | Value | Description |
-|---|---|---|
-| Constructor argument | `new BrowserlessProvider('http://...')` | Highest priority — overrides everything else |
-| `BROWSERLESS_URL` env var | `export BROWSERLESS_URL=http://...` | Used when no constructor argument is provided |
-| Default | `http://localhost:3000` | Fallback when neither of the above is set |
-
-## How It Works
+## How it works
 
 <Steps>
   <Step title="POST to /content">
-    For each `getPageContent` call, `BrowserlessProvider` sends a `POST` request to `{baseUrl}/content` with a JSON body containing the target URL and `gotoOptions` (timeout and `waitUntil`). The Browserless container launches a Chromium tab, navigates to the URL, waits for the condition, and returns the fully rendered HTML as the response body.
+    `getPageContent` sends a `POST` request to `{baseUrl}/content` with a JSON body containing the target `url` and `gotoOptions` (`waitUntil` and `timeout`). Browserless navigates to the URL inside a managed Chromium instance and returns the fully rendered HTML.
+  </Step>
+  <Step title="Response handling">
+    If the Browserless server returns a 2xx status, GitResolve reads the response body as text and returns it. A non-2xx response throws `Error: Browserless /content returned <status>: <statusText> <body>`.
   </Step>
   <Step title="Availability check">
-    `isAvailable()` sends a `GET` request to `{baseUrl}/json/version` with a 3000 ms timeout. If the container responds with a 2xx status, the provider is considered available. This check is used by `createProvider()` during auto-detection.
+    `isAvailable()` performs a `GET {baseUrl}/json/version` with a 3-second timeout. If the server responds with a 2xx status, the provider is considered available. Any network error or non-2xx response returns `false`.
   </Step>
-  <Step title="Cleanup">
-    `cleanup()` is a no-op. Because every request is a self-contained HTTP call and the provider holds no local state, there is nothing to release on the GitResolve side.
+  <Step title="Cleanup (no-op)">
+    Because Browserless is a stateless REST service — it manages its own browser pool internally — `cleanup()` does nothing. There are no local resources to release.
   </Step>
 </Steps>
 
 ## Options
 
-Pass a `BrowserProviderOptions` object as the second argument to `getPageContent` to override defaults:
-
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `timeout` | `number` | `30000` | Navigation timeout in milliseconds, forwarded to Chromium inside the container as `gotoOptions.timeout`. |
-| `waitUntil` | `'load' \| 'domcontentloaded' \| 'networkidle0' \| 'networkidle2'` | `'networkidle2'` | When to consider navigation complete, forwarded as `gotoOptions.waitUntil`. |
+| `timeout` | `number` | `30000` | Maximum milliseconds Browserless waits for the page to reach the `waitUntil` state. Passed as `gotoOptions.timeout`. |
+| `waitUntil` | `string` | `'networkidle2'` | Navigation completion condition. Passed as `gotoOptions.waitUntil`. Accepts `'load'`, `'domcontentloaded'`, `'networkidle0'`, or `'networkidle2'`. |
 
 ```typescript
-const html = await provider.getPageContent('https://janedoe.dev', {
-  timeout: 60000,
+const html = await provider.getPageContent('https://example.com/spa', {
   waitUntil: 'networkidle0',
+  timeout: 45000,
 });
 ```
 
 <Note>
-  `cleanup()` is a no-op for `BrowserlessProvider`. The provider is stateless — it holds no open connections or browser handles between requests. You may still call `cleanup()` for consistency when writing code that works with multiple provider types interchangeably.
+  `cleanup()` is a no-op for `BrowserlessProvider`. Calling it is safe and idiomatic, but it performs no work — the Browserless container manages its own Chromium lifecycle independently.
 </Note>

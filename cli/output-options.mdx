@@ -1,110 +1,174 @@
 ---
-title: "GitResolve Output Modes: JSON, Files, and Terminal Display"
+title: "GitResolve CLI Output Modes: Terminal, JSON, Files"
 sidebarTitle: "Output Options"
-description: "GitResolve can pretty-print results to the terminal, dump raw JSON to stdout for piping, or write per-candidate JSON files to an output directory."
+description: "Choose between GitResolve's ANSI terminal table, raw JSON to stdout for piping, or per-candidate JSON files written to an output directory on disk."
 ---
 
-GitResolve supports three output modes that can be combined to fit any workflow: a live ANSI-colored terminal display for interactive use, raw JSON piped to stdout for scripting and downstream tools, and structured per-candidate files written to disk for storage and further processing. All three modes work with both single-URL and batch invocations.
+GitResolve supports three output modes that can be used individually or in combination. The default terminal display is great for interactive use, `--json` makes it easy to pipe results into other tools, and `--output-dir` writes clean per-candidate files suitable for downstream automation.
 
-## Output Modes
+## Terminal Display (Default)
 
-### Terminal Display (Default)
-
-When neither `--json` nor `--output-dir` is specified, GitResolve prints a formatted, ANSI-colored table to the terminal as each candidate is resolved. Each row includes the candidate's owner handle, confidence level, count of owned repositories, contribution links, and any external references found. A summary line is printed at the end of every batch run.
+When neither `--json` nor `--output-dir` is provided, GitResolve prints an ANSI-colored summary table to your terminal. Each processed candidate gets one row with their resolved username, confidence level, number of owned repos, contributions, and any warnings. A summary line is printed at the end showing total resolved and unresolved counts.
 
 ```bash
 gitresolve --all
 ```
 
-### JSON to Stdout (`--json`)
+```
+🔍 ClyrisAI GitResolve
+────────────────────────────────────────
 
-The `--json` flag suppresses all terminal UI and writes a raw JSON array to stdout. Every element of the array is an `AggregatedResult` object. This mode is ideal for piping into `jq`, a database loader, or any other tool that consumes JSON from stdin.
+📂 Portfolio Links (from ./data/portfolio_links.csv)
+   Found 3 URL(s)
+   ✅ janedoe          [high]     3 repos  1 contribution
+   ✅ jsmith           [medium]   1 repo   0 contributions
+   ⚠️  alice-lee        [low]      0 repos  0 contributions
+
+📂 Resumes (from ./data/resumes/)
+   Found 2 PDF(s)
+   ✅ janedoe          (merged with portfolio source)
+   ✅ bob-chen         [high]     5 repos  2 contributions
+
+────────────────────────────────────────
+Resolved: 3   Unresolved: 1
+```
+
+<Note>
+  The terminal display is suppressed when `--json` is active, keeping stdout clean for piping.
+</Note>
+
+## `--json` Mode
+
+The `--json` flag suppresses all terminal UI output and prints the full results as a JSON array to stdout. Each element is an `AggregatedResult` object. This is the recommended mode when feeding GitResolve output into another tool or script.
 
 ```bash
 gitresolve --all --json
+gitresolve https://github.com/janedoe --json
 ```
 
-### Output Directory (`--output-dir <dir>`)
+```json
+[
+  {
+    "candidateUsername": "janedoe",
+    "sources": ["https://janedoe.dev", "./data/resumes/janedoe.pdf"],
+    "sourceTypes": ["portfolio", "resume_file"],
+    "ownerProfile": {
+      "url": "https://github.com/janedoe",
+      "provider": "github",
+      "type": "profile",
+      "username": "janedoe"
+    },
+    "confidence": "high",
+    "ownedRepos": [
+      {
+        "url": "https://github.com/janedoe/my-project",
+        "provider": "github",
+        "type": "repo",
+        "username": "janedoe",
+        "repo": "my-project"
+      }
+    ],
+    "contributions": [],
+    "externalRepos": [],
+    "allLinks": [],
+    "warnings": []
+  }
+]
+```
 
-The `--output-dir` flag writes one JSON file per candidate to disk. Resolved candidates (those with an identified git username) are placed under `<dir>/resolved/<username>.json`. Candidates that could not be linked to any git profile are placed under `<dir>/unresolved/<sanitized_source_name>_<N>.json`, where the filename is derived from the basename of the first source (with non-alphanumeric characters replaced by `_`) and `N` is a counter.
+<Tip>
+  Combine `--json` with `jq` for quick field extraction:
+
+  ```bash
+  # Extract all resolved usernames
+  gitresolve --all --json | jq '[.[] | .candidateUsername] | map(select(. != null))'
+
+  # Get all owned repo URLs for a specific user
+  gitresolve https://github.com/janedoe --json | jq '.[0].ownedRepos[].url'
+
+  # Filter to high-confidence results only
+  gitresolve --all --json | jq '[.[] | select(.confidence == "high")]'
+  ```
+</Tip>
+
+## `--output-dir` Mode
+
+The `--output-dir <dir>` flag writes one JSON file per candidate to a directory on disk. GitResolve creates two subdirectories automatically:
+
+- `<dir>/resolved/` — one `<username>.json` file per successfully resolved candidate
+- `<dir>/unresolved/` — one `<sanitized_source>_N.json` file per candidate that could not be resolved
 
 ```bash
-gitresolve --all --output-dir results/
+gitresolve --all --output-dir ./results
 ```
 
-`--json` and `--output-dir` can be combined: files are written to disk **and** the JSON array is printed to stdout.
-
-## Example Commands
-
-```bash
-# Pretty terminal output (default)
-gitresolve --all
-
-# JSON to stdout
-gitresolve --all --json
-
-# Pipe to jq
-gitresolve --all --json | jq '.[].ownerProfile'
-
-# Save to directory
-gitresolve --all --output-dir results/
-
-# JSON + directory (both)
-gitresolve --all --json --output-dir results/
-```
-
-## Output Directory Structure
-
-When `--output-dir results/` is used, GitResolve creates the following layout:
+### Output Directory Structure
 
 ```
 results/
 ├── resolved/
 │   ├── janedoe.json
-│   └── johndoe.json
+│   ├── jsmith.json
+│   └── bob-chen.json
 └── unresolved/
-    └── mystery_candidate_pdf_1.json
+    └── alice_lee_pdf_1.json
 ```
 
-Each file under `resolved/` is named after the candidate's git username. Files under `unresolved/` are named by taking the basename of the first source path or URL, replacing every non-alphanumeric character with `_`, and appending a counter — so `mystery candidate.pdf` becomes `mystery_candidate_pdf_1.json`.
+Each file contains the full `AggregatedResult` JSON for that candidate. Unresolved filenames are derived from the first source's basename with non-alphanumeric characters replaced by underscores, followed by an incrementing counter.
 
-## AggregatedResult JSON Shape
+<Note>
+  The `resolved/` and `unresolved/` subdirectories are created automatically. You do not need to create them in advance.
+</Note>
 
-Every file written to `resolved/` (and every element of the `--json` array) follows the `AggregatedResult` schema:
+## Combining `--json` and `--output-dir`
 
-```json
-{
-  "candidateUsername": "janedoe",
-  "sources": ["https://janedoe.dev", "./data/resumes/janedoe.pdf"],
-  "sourceTypes": ["portfolio", "resume_file"],
-  "ownerProfile": {
-    "url": "https://github.com/janedoe",
-    "provider": "github",
-    "type": "profile",
-    "username": "janedoe"
-  },
-  "confidence": "high",
-  "ownedRepos": [],
-  "contributions": [],
-  "externalRepos": [],
-  "allLinks": [],
-  "warnings": []
-}
+Both flags can be used together. When combined, GitResolve writes per-candidate JSON files to disk **and** prints the full JSON array to stdout simultaneously. This is useful for saving a permanent archive while also piping the results into a downstream script in one step.
+
+```bash
+gitresolve --all --json --output-dir ./results | jq '[.[] | .candidateUsername]'
 ```
 
-| Field | Description |
-|-------|-------------|
-| `candidateUsername` | Resolved git username, or `null` if unresolved |
-| `sources` | All input URLs or file paths that contributed to this candidate |
-| `sourceTypes` | Classifier label for each corresponding source |
-| `ownerProfile` | The candidate's primary git profile (`url`, `provider`, `type`, `username`) |
-| `confidence` | Resolution confidence: `high`, `medium`, or `low` |
-| `ownedRepos` | Repositories attributed to the candidate |
-| `contributions` | PR and issue links where the candidate is a contributor |
-| `externalRepos` | Repos referenced but not owned by the candidate |
-| `allLinks` | Every git URL extracted across all sources |
-| `warnings` | Non-fatal issues encountered during resolution |
+The two outputs are independent — the files on disk are not affected by what you pipe stdout into.
 
-<Tip>
-  At the end of every batch run, GitResolve prints a summary line to the terminal showing the total number of candidates processed, how many were successfully resolved, and how many could not be linked to a git profile — even when `--output-dir` suppresses the per-candidate output rows. Use this to quickly spot CSV rows or PDFs that need attention.
-</Tip>
+## `AggregatedResult` Schema
+
+Every output mode produces `AggregatedResult` objects. The table below describes every field.
+
+| Field | Type | Description |
+|---|---|---|
+| `candidateUsername` | `string \| null` | Resolved Git username, or `null` if no profile could be identified |
+| `sources` | `string[]` | All input sources (URLs and file paths) that contributed to this result |
+| `sourceTypes` | `InputType[]` | Classification of each source: `portfolio`, `git_profile`, `repo_url`, `resume_file`, `resume_url`, `linkedin`, or `unknown` |
+| `ownerProfile` | `ExtractedGitLink \| null` | The best-guess owner profile link, or `null` if unresolved |
+| `confidence` | `"high" \| "medium" \| "low" \| "none"` | How confident GitResolve is that the correct owner was identified |
+| `ownedRepos` | `ExtractedGitLink[]` | Repository links where the owner username matches `candidateUsername` |
+| `contributions` | `ExtractedGitLink[]` | Explicit pull request and issue links attributed to the candidate |
+| `externalRepos` | `ExtractedGitLink[]` | Repository links owned by other users (external references found on the page) |
+| `allLinks` | `ExtractedGitLink[]` | All Git links extracted from all sources, unfiltered |
+| `warnings` | `string[]` | Non-fatal messages such as unresolvable input types or scraping errors |
+
+### `ExtractedGitLink` Fields
+
+Each link object inside `ownedRepos`, `contributions`, `externalRepos`, and `allLinks` has the following shape:
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | `string` | The normalized URL of the link |
+| `provider` | `"github" \| "gitlab" \| "bitbucket"` | The Git hosting provider |
+| `type` | `"profile" \| "repo" \| "gist" \| "pull_request" \| "issue" \| "other"` | The kind of Git link |
+| `username` | `string` | The owner or author username extracted from the URL path |
+| `repo` | `string` _(optional)_ | Repository name, present when `type` is `repo`, `pull_request`, or `issue` |
+| `number` | `string` _(optional)_ | PR or issue number, present when `type` is `pull_request` or `issue` |
+
+### Confidence Levels
+
+| Value | Meaning |
+|---|---|
+| `high` | A Git profile URL was the direct input, or a single username dominated all discovered links |
+| `medium` | A username was inferred from multiple links but with some ambiguity |
+| `low` | A username was found but evidence was sparse or conflicting |
+| `none` | No Git profile could be identified from the input |
+
+<Warning>
+  A `confidence` of `"none"` does not always indicate an error. LinkedIn URLs, unknown input types, and pages with no Git links all produce `"none"` by design. Check the `warnings` array for a human-readable explanation.
+</Warning>

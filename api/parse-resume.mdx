@@ -1,192 +1,193 @@
 ---
-title: "parseResume: Extract Git Links from PDF Resumes"
+title: "parseResume — PDF Resume Parser API Reference"
 sidebarTitle: "parseResume"
-description: "parseResume reads a local PDF resume and extracts git URLs from both text content and embedded hyperlink annotations, returning a typed ResolverResult."
+description: "Parse a local PDF resume with dual-method extraction (text layer + hyperlink annotations) and receive a structured ResolverResult with git profiles."
 ---
 
-PDF resumes are a common candidate input but present a subtle extraction challenge: a hyperlink in a PDF can have visible text like `github.com/janedoe` while its embedded annotation points to a different URL entirely. `parseResume` addresses this by running two independent extraction passes on every file and merging the results, giving you a complete picture of every git link the candidate included.
+The resume parser reads a PDF file from the local filesystem and extracts every git provider URL it can find using two independent methods: rendered text extraction and hyperlink annotation scanning. Both methods run independently so that a failure in one does not block the other. The result is the same `ResolverResult` shape returned by `scrapePortfolio`, making it straightforward to combine portfolio and resume data downstream.
 
-## parseResume
+## `parseResume`
 
-`parseResume` reads a PDF from disk, extracts git URLs via text-scanning and annotation-inspection, deduplicates the results, and resolves ownership using the same disambiguator used by `scrapePortfolio`. It never throws — any read or parsing error is captured in `result.error`.
+Reads a local PDF file and resolves any git profile or repo links it contains into a structured `ResolverResult`.
 
 ```typescript
-export async function parseResume(filePath: string): Promise<ResolverResult>
+async function parseResume(filePath: string): Promise<ResolverResult>
 ```
 
 ### Parameters
 
 <ParamField path="filePath" type="string" required>
-  A local filesystem path to a PDF file. Passed directly to Node's `fs/promises.readFile`. Both relative (e.g. `./resumes/janedoe.pdf`) and absolute paths are accepted. The file must be a valid PDF — other document formats are not supported.
+  Path to a local PDF file. Both relative paths (`./resumes/janedoe.pdf`) and absolute paths (`/tmp/uploads/janedoe.pdf`) are accepted. The path is passed directly to Node.js `fs/promises.readFile`.
 </ParamField>
 
-### Return Value
+<Note>
+  `parseResume` only accepts **local file paths**. It cannot fetch remote PDFs over HTTP. If you have a PDF URL, download the file first and then pass the local path to `parseResume`.
+</Note>
 
-Returns `Promise<ResolverResult>`. The function never rejects — errors are stored in `result.error` instead.
+### Returns
+
+`Promise<ResolverResult>` — this function **never throws**. All errors are surfaced inside the result object.
 
 <ResponseField name="source" type="string">
-  The original `filePath` argument passed to `parseResume`.
+  The `filePath` argument, unchanged.
 </ResponseField>
-
-<ResponseField name="sourceType" type='"resume_file"'>
+<ResponseField name="sourceType" type="'resume_file'">
   Always `'resume_file'` for results from this function.
 </ResponseField>
-
 <ResponseField name="ownerProfile" type="ExtractedGitLink | null">
-  The resolved candidate profile, or `null` if no git links were found or disambiguation failed.
+  The resolved candidate git profile, or `null` if none could be determined from the resume.
 </ResponseField>
-
-<ResponseField name="confidence" type='"high" | "medium" | "low" | "none"'>
-  How certain the disambiguator is about the resolved owner. Resumes most commonly yield `'high'` confidence when a single GitHub profile URL is found, or `'medium'` when only repo links are present and one username dominates. See [Disambiguator](/api/resolve-owner) for the full logic.
+<ResponseField name="confidence" type="'high' | 'medium' | 'low' | 'none'">
+  Confidence level from the owner disambiguation step.
 </ResponseField>
-
 <ResponseField name="ownedRepos" type="ExtractedGitLink[]">
-  Repo links where `link.username` matches the resolved owner's username (case-insensitive).
+  Repos whose owner username matches the resolved candidate username (case-insensitive).
 </ResponseField>
-
 <ResponseField name="contributions" type="ExtractedGitLink[]">
-  Links with `type === 'pull_request'` or `type === 'issue'` — explicit contribution signals found in the resume.
+  Explicit PR and issue links found in the resume.
 </ResponseField>
-
 <ResponseField name="externalRepos" type="ExtractedGitLink[]">
-  Repo links where the username does not match the resolved owner — open source libraries or projects the candidate referenced but does not own.
+  Repos referenced in the resume but owned by a different username.
 </ResponseField>
-
 <ResponseField name="allLinks" type="ExtractedGitLink[]">
-  Every parsed git link found in the PDF, combining both extraction methods, deduplicated and normalized (trailing slashes stripped).
+  Every `ExtractedGitLink` parsed from the resume, before categorisation.
 </ResponseField>
-
 <ResponseField name="warnings" type="string[]">
-  Diagnostic messages from both extraction passes and the disambiguator. Successful text extraction appends a count message (e.g. `"Found 3 git URL(s) in text content"`). If either extraction pass fails, the specific error message is recorded here rather than in `result.error`.
+  Diagnostic messages. Extraction method failures appear here (e.g. `"Text extraction failed: ..."` or `"Annotation extraction failed: ..."`). Also includes counts and disambiguator messages.
+</ResponseField>
+<ResponseField name="error" type="string | undefined">
+  Set **only** when `fs.readFile` itself fails (file not found, permission denied, etc.). Individual extraction method failures are in `warnings`, not `error`.
 </ResponseField>
 
-<ResponseField name="error" type="string">
-  Present only if the entire parse failed (e.g. the file could not be read). Per-method failures within the PDF parsing pipeline are recorded as `warnings` instead, so partial results are still returned. When `error` is set, all other result fields hold their empty defaults.
-</ResponseField>
-
-### How It Works
-
-`parseResume` runs two independent extraction passes using the `unpdf` library, then merges and deduplicates the results.
+### How it works
 
 <Steps>
-  <Step title="Read file from disk">
-    Calls `fs/promises.readFile(filePath)` to load the PDF as a `Buffer`. Two separate `Uint8Array` copies are created from this buffer — one per extraction pass — because the `unpdf` document proxy is consumed on use.
+  <Step title="Read the file">
+    Calls `fs.readFile(filePath)` to load the entire PDF into a `Buffer`. If this fails (file not found, permission error), `result.error` is set and the function returns immediately with empty arrays.
   </Step>
-  <Step title="Method 1 — Text extraction">
-    Calls `unpdf`'s `getDocumentProxy` and `extractText({ mergePages: true })` to get the full PDF text as a single string. Passes that string to `extractGitUrlsFromText()`, which uses a regex to find all git provider URLs in the text content. Results are added to the working URL set.
+  <Step title="Method 1 — Text layer extraction">
+    Dynamically imports `unpdf` and calls `getDocumentProxy` + `extractText` with `mergePages: true`. The resulting text string is passed to `extractGitUrlsFromText`, which regex-scans for all git provider URLs. Failures are caught and appended to `result.warnings` without affecting Method 2.
   </Step>
-  <Step title="Method 2 — Annotation extraction">
-    Opens a second document proxy and iterates every page via `pdf.getPage(i)` and `page.getAnnotations()`. For each annotation with `subtype === 'Link'` and a `.url` string, checks if the URL's hostname exists in the `GIT_HOSTS` map. Matching URLs are added to the working set. This catches embedded hyperlinks whose anchor text differs from the href.
+  <Step title="Method 2 — Hyperlink annotation extraction">
+    Creates a second independent copy of the PDF buffer (to avoid shared-state issues) and iterates every page via `pdf.getPage(i)` + `page.getAnnotations()`. Any annotation of `subtype: 'Link'` with a `url` string is checked against `GIT_HOSTS`. Matching annotation URLs are collected. Failures are caught and appended to `result.warnings`.
   </Step>
-  <Step title="Deduplicate and parse">
-    The combined URL list is deduplicated with trailing slashes stripped (`/+$` removed), then each URL is passed through `parseGitLink()` to produce `ExtractedGitLink` objects. Results populate `result.allLinks`.
+  <Step title="Deduplicate">
+    Both URL sets are merged, trailing slashes are stripped, and the combined list is deduplicated with `Set`. This handles the common case where a git URL appears as both visible text and a clickable hyperlink.
   </Step>
-  <Step title="Resolve owner and categorize">
-    Passes `result.allLinks` to `resolveOwnerAndCategorize()`. The `'resume'` string is also passed as `sourceContext` but has no effect on the algorithm. The returned `OwnerResolution` fields are spread onto the result object.
+  <Step title="Parse and classify">
+    Each unique URL is passed to `parseGitLink`. Results that are not `null` are added to `result.allLinks`.
+  </Step>
+  <Step title="Resolve owner and categorise">
+    `resolveOwnerAndCategorize(result.allLinks, 'resume')` runs the full disambiguation logic and populates `ownerProfile`, `confidence`, `ownedRepos`, `contributions`, and `externalRepos`.
   </Step>
 </Steps>
 
-<Note>
-  Each extraction method runs independently in its own `try/catch`. If Method 1 fails (e.g. the PDF has no extractable text layer), the failure is recorded as a warning and Method 2 still runs. You will always get the best partial result available.
-</Note>
+### Error vs warnings
 
-### Usage Examples
+| Scenario | Where it appears |
+|---|---|
+| File not found / permission denied | `result.error` |
+| `unpdf` text extraction threw | `result.warnings` |
+| Annotation iteration threw | `result.warnings` |
+| Disambiguator could not find an owner | `result.warnings` (and `confidence: 'none'`) |
+
+<Tip>
+  Always check `result.warnings` even on success. A warning like `"Text extraction failed: ..."` means only the annotation method ran — the result may be less complete than expected.
+</Tip>
+
+### Examples
 
 <CodeGroup>
-
-```typescript Basic usage
+```typescript Single resume
 import { parseResume } from '@clyrisai/gitresolve';
 
 const result = await parseResume('./resumes/janedoe.pdf');
 
 if (result.error) {
-  console.error('Failed to read file:', result.error);
+  console.error('Could not read file:', result.error);
 } else {
-  console.log('Owner:       ', result.ownerProfile?.username);
-  console.log('Confidence:  ', result.confidence);
-  console.log('All links:   ', result.allLinks.length);
-  console.log('Owned repos: ', result.ownedRepos.map(r => r.repo));
-  console.log('External:    ', result.externalRepos.map(r => r.repo));
-
-  for (const warning of result.warnings) {
-    console.log('[warn]', warning);
-  }
+  console.log('Owner profile:', result.ownerProfile?.url);
+  console.log('Confidence:',    result.confidence);
+  console.log('Owned repos:',   result.ownedRepos.map(r => r.repo));
+  console.log('Contributions:', result.contributions.length);
+  console.log('Warnings:',      result.warnings);
 }
 ```
 
-```typescript Inspecting extraction diagnostics
-import { parseResume } from '@clyrisai/gitresolve';
-
-const result = await parseResume('./resumes/janedoe.pdf');
-
-// warnings surface per-method counts and any extraction failures
-const textFound   = result.warnings.find(w => w.includes('text content'));
-const textFailed  = result.warnings.find(w => w.includes('Text extraction failed'));
-const annotFailed = result.warnings.find(w => w.includes('Annotation extraction failed'));
-
-if (textFailed)  console.warn('Text pass failed:       ', textFailed);
-if (annotFailed) console.warn('Annotation pass failed: ', annotFailed);
-if (textFound)   console.log('Text pass found URLs:   ', textFound);
-```
-
-```typescript Processing multiple resumes
+```typescript Multiple resumes in parallel
 import { parseResume } from '@clyrisai/gitresolve';
 import { readdir } from 'fs/promises';
-import path from 'path';
+import { join } from 'path';
 
 const resumeDir = './resumes';
 const files = (await readdir(resumeDir)).filter(f => f.endsWith('.pdf'));
 
 const results = await Promise.all(
-  files.map(file => parseResume(path.join(resumeDir, file)))
+  files.map(f => parseResume(join(resumeDir, f)))
 );
 
 for (const result of results) {
-  if (result.error) {
-    console.error(`${result.source}: ERROR — ${result.error}`);
-    continue;
+  const username = result.ownerProfile?.username ?? 'unresolved';
+  const confidence = result.confidence;
+  console.log(`${result.source}: ${username} (${confidence})`);
+
+  if (result.warnings.length > 0) {
+    console.warn('  Warnings:', result.warnings.join('; '));
   }
-  console.log(
-    `${result.source}: ${result.ownerProfile?.username ?? 'unresolved'} (${result.confidence})`
-  );
 }
 ```
 
-</CodeGroup>
-
-### Handling Remote Resume URLs
-
-`parseResume` only accepts local file paths. For a resume hosted at a URL, download the file first, then pass the local path.
-
-```typescript
+```typescript Remote PDF — download first
 import { parseResume } from '@clyrisai/gitresolve';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
-import path from 'path';
+import { join } from 'path';
 
-async function parseRemoteResume(url: string) {
-  const response = await fetch(url);
-  const buffer   = Buffer.from(await response.arrayBuffer());
+async function parseRemotePdf(pdfUrl: string) {
+  const response = await fetch(pdfUrl);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-  const tmpPath = path.join(tmpdir(), `resume-${Date.now()}.pdf`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const tmpPath = join(tmpdir(), `resume-${Date.now()}.pdf`);
+
   await writeFile(tmpPath, buffer);
 
   try {
     return await parseResume(tmpPath);
   } finally {
-    await unlink(tmpPath);
+    await unlink(tmpPath).catch(() => {});
   }
 }
+
+const result = await parseRemotePdf('https://example.com/candidates/janedoe.pdf');
+console.log('Owner:', result.ownerProfile?.username);
 ```
 
-<Tip>
-  When using the CLI, pass `--type resume` together with a remote URL and GitResolve handles the download automatically. The programmatic API requires a local path.
-</Tip>
+```typescript Combining with portfolio result
+import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresolve';
 
-<Note>
-  Only PDF files are supported. DOCX, HTML-exported resumes, and other document formats are not currently parsed by `parseResume`. Convert to PDF before passing to this function.
-</Note>
+const provider = await createProvider();
 
-<Note>
-  `unpdf` is a bundled production dependency of `@clyrisai/gitresolve` — no separate install is required. Both extraction methods rely on it.
-</Note>
+try {
+  const [portfolio, resume] = await Promise.all([
+    scrapePortfolio('https://janedoe.dev', provider),
+    parseResume('./resumes/janedoe.pdf'),
+  ]);
+
+  // Both resolve to the same candidate — pick the higher-confidence result
+  const primary = portfolio.confidence === 'high' ? portfolio : resume;
+  console.log('Primary owner:', primary.ownerProfile?.username);
+
+  // Merge owned repos from both sources
+  const allOwnedRepos = [
+    ...portfolio.ownedRepos,
+    ...resume.ownedRepos,
+  ].filter((r, i, arr) =>
+    arr.findIndex(x => x.url === r.url) === i
+  );
+  console.log('Total unique owned repos:', allOwnedRepos.length);
+} finally {
+  await provider.cleanup();
+}
+```
+</CodeGroup>

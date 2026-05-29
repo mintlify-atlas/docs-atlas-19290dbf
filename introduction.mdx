@@ -1,71 +1,67 @@
 ---
-title: "GitResolve: Turn Candidate Submissions into Git Profiles"
+title: "GitResolve: Resolve Candidate Profiles from Any Source"
 sidebarTitle: "Introduction"
-description: "GitResolve resolves portfolio sites, GitHub links, and resume PDFs into structured developer profiles with owned repos, contributions, and confidence scores."
+description: "GitResolve turns messy candidate submissions — portfolio URLs, resume PDFs, and git links — into structured GitHub, GitLab, and Bitbucket profiles."
 ---
 
-GitResolve is an npm library and CLI tool that turns raw candidate submissions — messy portfolio URLs, direct GitHub links, and resume PDFs — into clean, structured developer profiles ready for use in any recruiting pipeline. Whether you're building a custom ATS integration, enriching candidate records in Lever or Greenhouse, or running a standalone screening script, GitResolve gives your tooling a reliable, typed interface to the candidate's actual git activity.
+GitResolve (`@clyrisai/gitresolve`) is an npm library and CLI tool that takes raw candidate inputs — portfolio websites, resume PDFs, direct GitHub/GitLab/Bitbucket profile links, or individual repository URLs — and resolves them into clean, structured git profiles with confidence scoring and categorized repository data. Whether you're building a hiring pipeline, a talent sourcing tool, or an ATS integration, GitResolve removes the manual work of extracting and normalizing the git presence from a candidate submission.
 
-## The Problem GitResolve Solves
+## The Problem It Solves
 
-Candidates submit their work in every format imaginable: a personal domain that routes to a React SPA, a GitHub profile URL buried in a PDF's hyperlink annotations, a GitLab username in plain text, or a Bitbucket repo link nested inside a portfolio page. Extracting structured developer data from this noise — reliably, at scale — is tedious work that shouldn't live in your application logic.
+Hiring teams collect candidate data from many sources: job application forms with a plain-text "GitHub URL" field, resume PDFs that bury hyperlinks in annotations, portfolio sites built with JavaScript-heavy frameworks, and shared spreadsheets full of unvalidated links. The result is a messy mix of dead links, partial usernames, repo URLs mistaken for profile URLs, and external contributions tangled up with personal projects.
 
-GitResolve handles the full pipeline: classify the input, fetch and render the page (even JavaScript-heavy SPAs), extract every git URL present, disambiguate which profile belongs to the candidate versus which repos are just references, and return a single typed `ResolverResult` object with confidence scoring. You get owned repos, PR/issue contributions, external references, and diagnostics — no bespoke scraping code required.
+GitResolve classifies each input, scrapes it with the right browser strategy, parses PDF text and annotation layers, disambiguates who the actual candidate is, and returns a single `ResolverResult` object with clear fields for the owner profile, owned repositories, contribution signals, and any warnings encountered along the way.
 
 ## Key Capabilities
 
-- **Portfolio scraping** — fetches portfolio sites and extracts all GitHub, GitLab, and Bitbucket URLs found on the page, including links hidden inside JavaScript-rendered content
-- **Resume PDF parsing** — extracts raw text and deeply embedded hyperlink annotations from PDF files, catching git URLs that plain text extraction misses
-- **Multi-provider support** — GitHub, GitLab, and Bitbucket profiles and repositories are all first-class inputs
-- **Owner disambiguation** — separates the candidate's actual profile from repos they merely reference or contributed to
-- **Confidence scoring** — every result carries a `"high" | "medium" | "low" | "none"` confidence value so downstream consumers can triage uncertain matches
-- **CLI and programmatic API** — use the `gitresolve` command directly from a terminal or import the library into any Node.js or Bun backend
+- **Portfolio scraping** — fetches and parses candidate portfolio sites, extracting all git links from HTML content
+- **Resume PDF parsing** — extracts both raw text and deeply buried hyperlink annotations from PDF files, including remote URLs
+- **GitHub, GitLab, and Bitbucket support** — fully resolves profiles, repos, pull requests, and issues across all three providers
+- **Owner disambiguation** — separates the candidate's own repositories from external repos they have referenced or contributed to
+- **Confidence scoring** — each result includes a `high | medium | low | none` confidence rating for the resolved owner profile
+- **CLI and programmatic API** — run interactively from the terminal or import directly into any Node.js or Bun backend
 
 ## Supported Input Types
 
-Every input type below can be passed directly to the CLI or to `scrapePortfolio` / `parseResume` in the programmatic API.
+GitResolve automatically classifies each input before processing it. You can also pass a `--type` hint via the CLI to override classification.
 
-| Input Type | Example | What GitResolve Does |
+| Input Type | Example | What Happens |
 |---|---|---|
-| **Portfolio site** | `https://janedoe.dev` | Scrapes the page for all git profile and repo links |
-| **GitHub profile** | `https://github.com/janedoe` | Scrapes the profile page and discovers owned repos |
-| **GitLab profile** | `https://gitlab.com/janedoe` | Scrapes the profile, handles `/users/` routes |
-| **Bitbucket profile** | `https://bitbucket.org/janedoe` | Scrapes the profile page |
-| **Repo URL** | `https://github.com/janedoe/my-project` | Scrapes the repo page and resolves the owner profile |
-| **PR / Issue URL** | `https://github.com/org/repo/pull/42` | Extracted and categorized as a contribution signal |
-| **Resume PDF** | `./resume.pdf` or a remote PDF URL | Extracts text and hyperlink annotations for git URLs |
+| `portfolio` | `https://janedoe.dev` | Page is fetched and scraped for all git links |
+| `git_profile` | `https://github.com/janedoe` | Profile page is scraped; repos and username extracted |
+| `repo_url` | `https://github.com/janedoe/my-project` | Repo page is scraped; owner is resolved |
+| `resume_file` | `./resume.pdf` | PDF text and hyperlink annotations are parsed |
+| `resume_url` | `https://example.com/resume.pdf` | PDF is fetched, then parsed as above |
+| `linkedin` | `https://linkedin.com/in/janedoe` | Flagged and skipped — not scrapeable |
+| `unknown` | Unrecognized string | Returned with a warning; no processing attempted |
 
 ## Browser Providers
 
-GitResolve supports three strategies for fetching page content. Puppeteer is bundled as a dependency and used by default when available — you only need to intervene when you want to force a specific provider or use Browserless.
+GitResolve supports three browser providers for fetching page content. The `createProvider()` function automatically selects the best available one using the resolution order: **puppeteer → browserless → fetch**. You can override this with the `--provider` CLI flag or the `BROWSER_PROVIDER` environment variable.
 
-| Provider | How to Enable | JS Rendering | Best For |
+| Provider | Requires | JavaScript Rendering | Best For |
 |---|---|---|---|
-| `puppeteer` | Bundled — available by default | ✅ Full | SPAs, JavaScript-heavy portfolio sites |
-| `browserless` | Run the Docker container | ✅ Full | Server environments, CI/CD pipelines |
-| `fetch` | Built-in, no install needed | ❌ None | Static HTML sites, fast fallback |
-
-See the [Browser Providers guide](/providers/overview) for Browserless Docker setup and provider configuration details.
-
-## Enterprise ATS Integrations
+| `puppeteer` | Bundled dependency (auto-installed) | ✅ Full | SPAs and JavaScript-heavy portfolio sites |
+| `browserless` | Running Docker container | ✅ Full | Server environments, CI/CD pipelines |
+| `fetch` | Nothing | ❌ None | Static HTML sites, fast fallback |
 
 <Info>
-  Are you processing large CSV exports from Lever, Greenhouse, or Ashby with custom column mappings? Native zero-configuration ATS integrations are being prioritized based on user demand. [Open an issue](https://github.com/ClyrisAI/gitresolve/issues) to register your platform and help shape the roadmap.
+  **Enterprise ATS Integrations (Lever, Greenhouse, Ashby)** — Are you processing large CSV exports from your ATS with custom column mappings? Native zero-configuration support for specific ATS platforms is being prioritized based on user demand. [Open an issue on GitHub](https://github.com/ClyrisAI/gitresolve/issues) to let us know which integration you need.
 </Info>
 
-## Where to Go Next
+## Next Steps
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="bolt" href="/quickstart">
-    Resolve your first candidate profile in under 2 minutes using the CLI or TypeScript API.
+    Resolve your first candidate profile in under five minutes using the CLI or the TypeScript API.
   </Card>
-  <Card title="CLI Guide" icon="terminal" href="/cli/overview">
-    Full reference for all CLI flags, batch processing, output options, and provider selection.
+  <Card title="Installation" icon="download" href="/installation">
+    Install options: zero-install with npx, global CLI, or project dependency with npm/pnpm/yarn/bun.
   </Card>
-  <Card title="API Reference" icon="code" href="/api/overview">
-    TypeScript API docs for `scrapePortfolio`, `parseResume`, `createProvider`, and all exported types.
+  <Card title="CLI Guide" icon="terminal" href="/cli">
+    Full reference for all CLI flags, batch processing modes, and output options.
   </Card>
   <Card title="Browser Providers" icon="globe" href="/providers/overview">
-    Configure fetch, Puppeteer, or Browserless to match your infrastructure and rendering needs.
+    Configure Puppeteer, Browserless, or the lightweight fetch provider for your environment.
   </Card>
 </CardGroup>

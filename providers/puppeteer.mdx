@@ -1,123 +1,124 @@
 ---
-title: "PuppeteerProvider: Full Headless Browser Rendering"
+title: "Puppeteer Provider — Headless Chromium Rendering | GitResolve"
 sidebarTitle: "Puppeteer"
-description: "PuppeteerProvider runs headless Chromium to fully render JavaScript-heavy portfolio sites and single-page applications before extracting git profile links."
+description: "PuppeteerProvider launches headless Chromium to fully execute JavaScript, making it the most compatible option for SPAs and dynamic portfolio sites."
 ---
 
-`PuppeteerProvider` launches a real headless Chromium browser via the [Puppeteer](https://pptr.dev) library to fetch page content. Unlike `FetchProvider`, it executes all JavaScript on the page before returning HTML — making it the right choice when a candidate's portfolio is a React, Vue, Next.js, or similar single-page application that renders content entirely in the browser. The provider keeps a single browser instance alive across multiple calls and creates a fresh page per URL, so repeated lookups within the same session are efficient.
+`PuppeteerProvider` drives a real headless Chromium browser through the [Puppeteer](https://pptr.dev) library. Unlike `FetchProvider`, it executes JavaScript on every page it visits, which means single-page applications, lazy-loaded content, and client-side-rendered portfolios are all resolved correctly. A single browser process is launched on first use and reused across multiple `getPageContent` calls; each URL gets its own fresh page that is closed immediately after.
 
 ## Installation
 
-Puppeteer is included in `@clyrisai/gitresolve`'s `dependencies` and is installed automatically when you run:
+Puppeteer is listed as a direct dependency of `@clyrisai/gitresolve` and is downloaded automatically:
 
 ```bash
 npm install @clyrisai/gitresolve
 ```
 
-No separate `npm install puppeteer` step is required for local project installs.
+For a **global CLI install** the bundled Puppeteer may not be on the path. If `gitresolve --provider puppeteer` reports that the provider is unavailable, install Puppeteer globally alongside it:
 
-<Note>
-  If you install GitResolve globally (`npm install -g @clyrisai/gitresolve`) and Puppeteer is not available in that environment, you will need to install it explicitly:
+```bash
+npm install -g puppeteer
+```
+
+<Tip>
+  Set `BROWSER_PROVIDER=puppeteer` in your shell profile to make Puppeteer the default without passing `--provider` every time.
 
   ```bash
-  npm install -g puppeteer
+  export BROWSER_PROVIDER=puppeteer
   ```
-
-  When using auto-detection via `createProvider()` with no argument, GitResolve will skip Puppeteer if it cannot be imported and try the next provider in the chain — no crash, no configuration needed.
-</Note>
+</Tip>
 
 ## Usage
 
 ### Direct instantiation
 
+Always call `provider.cleanup()` in a `finally` block so the browser process is terminated even if an error occurs:
+
 ```typescript
 import { PuppeteerProvider } from '@clyrisai/gitresolve';
 
 const provider = new PuppeteerProvider();
+
 try {
-  const result = await scrapePortfolio('https://janedoe.dev', provider);
-  console.log(result.ownerProfile);
+  const html = await provider.getPageContent('https://github.com/torvalds');
+  console.log(html.slice(0, 500));
 } finally {
-  await provider.cleanup(); // important: closes the browser
+  await provider.cleanup(); // closes the Chromium process
 }
 ```
 
-### Via factory
+### Via the factory
 
 ```typescript
 import { createProvider } from '@clyrisai/gitresolve';
 
 const provider = await createProvider('puppeteer');
+
+try {
+  const html = await provider.getPageContent('https://gitlab.com/someone');
+} finally {
+  await provider.cleanup();
+}
 ```
 
-### Via CLI
+### CLI
 
 ```bash
-gitresolve --provider puppeteer https://janedoe.dev
+gitresolve resolve resume.pdf --provider puppeteer
 ```
 
-<Tip>
-  Set the `BROWSER_PROVIDER=puppeteer` environment variable to always use Puppeteer without passing `--provider` on every CLI invocation or `'puppeteer'` to every `createProvider` call.
-
-  ```bash
-  export BROWSER_PROVIDER=puppeteer
-  gitresolve https://janedoe.dev
-  ```
-</Tip>
-
-## How It Works
+## How it works
 
 <Steps>
   <Step title="Lazy browser launch">
-    On the first call to `getPageContent`, Puppeteer is dynamically imported and a headless Chromium browser is launched with `{ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }`. The `--no-sandbox` flags are required in most CI and containerised environments where running a sandboxed browser process is not permitted.
+    The first call to `getPageContent` triggers `ensureBrowser()`, which imports Puppeteer dynamically and launches Chromium with the flags `--no-sandbox` and `--disable-setuid-sandbox`. Subsequent calls reuse the same browser instance.
   </Step>
-  <Step title="Page per URL">
-    A new browser page (tab) is opened for each `getPageContent` call. The page navigates to the target URL, waits for the configured `waitUntil` condition, then returns the fully rendered HTML. The page is closed immediately after — the browser instance itself stays open.
+  <Step title="New page per URL">
+    For every `getPageContent` call, a fresh browser page (`browser.newPage()`) is created. This prevents cookies, local storage, and cached state from leaking between requests.
   </Step>
-  <Step title="Cleanup">
-    Call `provider.cleanup()` when you are done. This closes the shared browser process and frees all associated memory. Failing to call `cleanup()` leaves a Chromium process running in the background.
+  <Step title="Navigation and content extraction">
+    Puppeteer navigates to the URL using `page.goto(url, { waitUntil, timeout })` and then calls `page.content()` to retrieve the fully rendered HTML — including all content injected by JavaScript.
+  </Step>
+  <Step title="Page teardown">
+    The page is closed in a `finally` block after each call, regardless of whether navigation succeeded or threw an error.
+  </Step>
+  <Step title="Browser cleanup">
+    Calling `provider.cleanup()` closes the Chromium process and sets the internal reference to `null`. After cleanup, the next `getPageContent` call will re-launch the browser automatically.
   </Step>
 </Steps>
 
-## Options
+## Launch arguments
 
-Pass a `BrowserProviderOptions` object as the second argument to `getPageContent` to override defaults:
+Chromium is always started with the following flags:
+
+| Flag | Purpose |
+|---|---|
+| `--no-sandbox` | Required in Docker containers and most CI environments where the kernel sandbox is restricted |
+| `--disable-setuid-sandbox` | Disables the setuid sandbox as a complementary measure for the same environments |
+
+## Options
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `timeout` | `number` | `30000` | Navigation timeout in milliseconds. Puppeteer throws if the page does not reach the `waitUntil` condition within this window. |
-| `waitUntil` | `'load' \| 'domcontentloaded' \| 'networkidle0' \| 'networkidle2'` | `'networkidle2'` | When to consider navigation complete. `networkidle2` waits until there are no more than 2 in-flight network requests for at least 500 ms — ideal for SPAs that batch-load API data on mount. |
+| `timeout` | `number` | `30000` | Maximum milliseconds to wait for the page to reach the `waitUntil` state before throwing a timeout error. |
+| `waitUntil` | `string` | `'networkidle2'` | Defines when navigation is considered complete. See the table below. |
+
+### `waitUntil` values
+
+| Value | When navigation completes |
+|---|---|
+| `'load'` | The `load` event fires — all synchronous resources (scripts, stylesheets, images) are loaded. Fastest, but may miss late-rendered content. |
+| `'domcontentloaded'` | The `DOMContentLoaded` event fires — the DOM is parsed but external resources may still be loading. |
+| `'networkidle0'` | No more than 0 network connections for at least 500 ms. Safest for heavily async apps, but slowest. |
+| `'networkidle2'` | No more than 2 network connections for at least 500 ms. Good balance of completeness and speed — **this is the default**. |
 
 ```typescript
-const html = await provider.getPageContent('https://janedoe.dev', {
-  timeout: 60000,
-  waitUntil: 'networkidle0',
+const html = await provider.getPageContent('https://example.com/spa', {
+  waitUntil: 'networkidle0', // wait for all async requests to finish
+  timeout: 45000,
 });
 ```
 
-## Launch Arguments
-
-The browser is always started with these Chromium flags:
-
-```
---no-sandbox
---disable-setuid-sandbox
-```
-
-These flags are required in Docker containers, GitHub Actions, and other Linux CI environments where the kernel does not allow a sandboxed child process. They are safe for the scraping use case where you control which URLs are visited.
-
 <Warning>
-  Always call `provider.cleanup()` after you are done — even if an error is thrown. Wrap your usage in a `try/finally` block to guarantee the browser process is closed:
-
-  ```typescript
-  const provider = new PuppeteerProvider();
-  try {
-    const html = await provider.getPageContent('https://janedoe.dev');
-    // ...
-  } finally {
-    await provider.cleanup();
-  }
-  ```
-
-  Skipping `cleanup()` leaves a headless Chromium process running until your Node.js process exits, which can exhaust file descriptors and memory in long-running services.
+  Always call `provider.cleanup()` in a `finally` block. If your process exits without calling it, the Chromium subprocess will be left running in the background. Over time this can exhaust system memory and file descriptors in long-lived services.
 </Warning>

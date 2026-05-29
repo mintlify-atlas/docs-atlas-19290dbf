@@ -122,7 +122,7 @@ type GitLinkType = 'profile' | 'repo' | 'gist' | 'pull_request' | 'issue' | 'oth
 </ResponseField>
 
 <ResponseField name="'gist'" type="GitLinkType">
-  A GitHub Gist (e.g. `https://gist.github.com/janedoe/abc123`).
+  A GitHub Gist. This value is defined in the type union for completeness; `parseGitLink` currently returns `null` for `gist.github.com` URLs because that hostname is not in `GIT_HOSTS`.
 </ResponseField>
 
 <ResponseField name="'pull_request'" type="GitLinkType">

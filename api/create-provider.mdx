@@ -1,51 +1,52 @@
 ---
-title: "createProvider: Instantiate a Browser Provider for GitResolve"
+title: "createProvider — Browser Provider Factory & Interface"
 sidebarTitle: "createProvider"
-description: "createProvider() auto-detects and returns the best available BrowserProvider (Puppeteer, Browserless, or fetch) for fetching portfolio page content."
+description: "Auto-detect or explicitly select a BrowserProvider for portfolio scraping. Reference for FetchProvider, PuppeteerProvider, BrowserlessProvider, and the BrowserProvider interface."
 ---
 
-`createProvider` is the entry point for controlling how GitResolve fetches and renders portfolio pages. It returns a `BrowserProvider` instance that abstracts away the differences between Puppeteer (full headless Chrome), Browserless (a remote browser REST API), and native `fetch` (lightweight, no JS rendering). You can let GitResolve auto-detect the best available engine, force a specific one by name, or supply your own custom implementation without any registration step.
+GitResolve separates page-fetching concerns from link extraction through the `BrowserProvider` interface. This lets you choose between a lightweight plain-`fetch` approach and a full headless browser without changing any other code. The `createProvider` factory handles automatic detection so most applications never need to instantiate a provider class directly.
 
----
+## `createProvider`
 
-## createProvider
+Creates and returns the best available `BrowserProvider`. Providers are tested for availability before being returned, so the result is always usable.
 
 ```typescript
 async function createProvider(preferred?: ProviderName): Promise<BrowserProvider>
 ```
 
-Instantiates and returns a `BrowserProvider`. When called without arguments, GitResolve checks the `BROWSER_PROVIDER` environment variable and then walks a fallback chain until it finds a working engine.
-
 ### Parameters
 
-<ParamField path="preferred" type="'puppeteer' | 'browserless' | 'fetch'" optional>
-  Pin the provider to a specific engine. If the requested engine is not available (e.g. `puppeteer` is not installed), `createProvider` throws immediately rather than falling back. Omit this argument to allow automatic detection.
+<ParamField path="preferred" type="ProviderName">
+  Optional explicit provider name. When specified, `createProvider` attempts to use **only** that provider. If the requested provider is unavailable, the function **throws** rather than silently falling back.
 </ParamField>
 
 ### Returns
 
-`Promise<BrowserProvider>` — a ready-to-use provider instance. Always call `provider.cleanup()` when finished to avoid leaving browser processes or sockets open.
+`Promise<BrowserProvider>` — a ready-to-use provider instance.
 
 ### Resolution order
 
-When `preferred` is not supplied, `createProvider` resolves the engine in this order:
+1. **`preferred` argument** — if supplied, that provider is attempted. Throws `Error('Requested provider '${preferred}' is not available')` if unavailable.
+2. **`BROWSER_PROVIDER` environment variable** — if set to a valid `ProviderName`, behaves as if `preferred` was passed (including the throw-on-unavailable behaviour).
+3. **Automatic fallback chain** — `puppeteer` → `browserless` → `fetch`. The first provider that reports `isAvailable() === true` is returned.
 
-1. **Explicit argument** — if `preferred` is set, that provider is used (or an error is thrown if it is unavailable).
-2. **`BROWSER_PROVIDER` env var** — if set, treated identically to passing that value as `preferred`.
-3. **Automatic fallback chain** — Puppeteer → Browserless → Fetch. The first engine that passes its `isAvailable()` check is returned. Because `fetch` is built into Node 18+ and has no external dependencies, this chain always resolves.
+<Note>
+  `FetchProvider.isAvailable()` always returns `true` (built into Node.js 18+), so the automatic fallback chain never exhausts all options. If neither Puppeteer nor a Browserless instance is reachable, `FetchProvider` is returned as the ultimate fallback.
+</Note>
 
-### Usage examples
+### Examples
 
 <CodeGroup>
+```typescript Auto-detect
+import { createProvider, scrapePortfolio } from '@clyrisai/gitresolve';
 
-```typescript Auto-detect (recommended)
-import { createProvider } from '@clyrisai/gitresolve';
-
+// Automatically picks the best available provider
 const provider = await createProvider();
 
 try {
-  const html = await provider.getPageContent('https://janedoe.dev');
-  // process html...
+  const result = await scrapePortfolio('https://janedoe.dev', provider);
+  console.log(result.ownerProfile?.username);
+  console.log(result.warnings[0]); // which provider was used
 } finally {
   await provider.cleanup();
 }
@@ -58,51 +59,56 @@ import { createProvider } from '@clyrisai/gitresolve';
 const provider = await createProvider('puppeteer');
 
 try {
-  const html = await provider.getPageContent('https://janedoe.dev', {
-    waitUntil: 'networkidle2',
-    timeout: 30000,
-  });
+  // Full JS rendering available
 } finally {
   await provider.cleanup();
 }
 ```
 
-```typescript Force fetch (always available)
+```typescript Force fetch
 import { createProvider } from '@clyrisai/gitresolve';
 
-// fetch is built into Node 18+ — never throws
+// Always succeeds — fetch is built into Node 18+
 const provider = await createProvider('fetch');
+```
+
+```typescript Via environment variable
+# .env or shell
+export BROWSER_PROVIDER=browserless
+export BROWSERLESS_URL=http://localhost:3000
+```
+
+```typescript Graceful degradation
+import { createProvider } from '@clyrisai/gitresolve';
+
+let provider;
+try {
+  provider = await createProvider('puppeteer');
+  console.log('Using full headless browser');
+} catch {
+  provider = await createProvider('fetch');
+  console.warn('Puppeteer unavailable, falling back to fetch');
+}
 
 try {
-  const html = await provider.getPageContent('https://janedoe.dev');
+  // use provider
 } finally {
   await provider.cleanup();
 }
 ```
-
 </CodeGroup>
 
-### Setting the provider via environment variable
+### `ProviderName` type
 
-You can select the provider without changing code by setting `BROWSER_PROVIDER` before running the CLI or your application. This is useful in CI pipelines or Docker environments where a specific engine is always present.
-
-```bash
-BROWSER_PROVIDER=puppeteer gitresolve --portfolios
+```typescript
+type ProviderName = 'puppeteer' | 'browserless' | 'fetch';
 ```
-
-```bash
-BROWSER_PROVIDER=browserless gitresolve --portfolios
-```
-
-<Note>
-  If `BROWSER_PROVIDER` is set to a provider that fails `isAvailable()`, `createProvider` throws the same error it would throw if you had passed that name as `preferred`.
-</Note>
 
 ---
 
-## BrowserProvider interface
+## `BrowserProvider` interface
 
-Every provider — including custom ones — must implement the `BrowserProvider` interface. The four members below are the complete contract.
+The contract that all three provider classes — and any custom provider — must implement.
 
 ```typescript
 interface BrowserProvider {
@@ -113,38 +119,27 @@ interface BrowserProvider {
 }
 ```
 
-<ResponseField name="name" type="string" required>
-  A human-readable identifier for the provider. Built-in values are `'fetch'`, `'puppeteer'`, and `'browserless'`. Used in log output and error messages.
+<ResponseField name="name" type="string (readonly)">
+  Human-readable identifier for the provider. Used in `scrapePortfolio` warning messages. Values for the built-in providers: `'fetch'`, `'puppeteer'`, `'browserless'`.
 </ResponseField>
 
-<ResponseField name="getPageContent(url, options?)" type="Promise<string>" required>
-  Fetches and returns the fully rendered HTML of `url` as a string. For headless-browser providers (`puppeteer`, `browserless`) this includes JavaScript-rendered content; for the `fetch` provider it returns the raw server-sent HTML.
-
-  <Expandable title="Parameters">
-    <ResponseField name="url" type="string" required>
-      The absolute URL of the page to fetch.
-    </ResponseField>
-    <ResponseField name="options" type="BrowserProviderOptions" optional>
-      Per-request options. See [BrowserProviderOptions](#browserprovider-options) below.
-    </ResponseField>
-  </Expandable>
-
-  Throws if the request fails (non-2xx status, network error, or timeout).
+<ResponseField name="getPageContent" type="(url: string, options?: BrowserProviderOptions) => Promise<string>">
+  Fetches a URL and returns the fully rendered HTML as a string. For `FetchProvider` this is the raw server response. For `PuppeteerProvider` and `BrowserlessProvider` this is the post-JavaScript-execution DOM serialisation.
 </ResponseField>
 
-<ResponseField name="isAvailable()" type="Promise<boolean>" required>
-  Returns `true` if the provider can be used in the current environment. For `puppeteer` this checks whether the `puppeteer` package can be imported. For `browserless` it pings `BROWSERLESS_URL/json/version` with a 3 s timeout. For `fetch` it always returns `true`.
+<ResponseField name="isAvailable" type="() => Promise<boolean>">
+  Returns `true` if the provider can be used in the current environment. `FetchProvider` always returns `true`. `PuppeteerProvider` attempts a dynamic import of `puppeteer`. `BrowserlessProvider` attempts a `GET /json/version` health check with a 3-second timeout.
 </ResponseField>
 
-<ResponseField name="cleanup()" type="Promise<void>" required>
-  Releases all resources held by the provider. For `puppeteer` this closes the shared browser instance. For `browserless` and `fetch` there is nothing to release, but the method still exists so callers can always call `cleanup()` without branching on provider type.
+<ResponseField name="cleanup" type="() => Promise<void>">
+  Releases any held resources. For `PuppeteerProvider` this closes the managed browser instance. For `FetchProvider` and `BrowserlessProvider` this is a no-op. Always call `cleanup()` in a `finally` block.
 </ResponseField>
 
 ---
 
-## BrowserProviderOptions
+## `BrowserProviderOptions`
 
-Per-request options passed as the second argument to `getPageContent`. Both fields are optional and fall back to per-provider defaults when omitted.
+Options accepted by `getPageContent` to control navigation behaviour.
 
 ```typescript
 interface BrowserProviderOptions {
@@ -153,76 +148,142 @@ interface BrowserProviderOptions {
 }
 ```
 
-<ResponseField name="timeout" type="number" optional>
-  Navigation timeout in milliseconds. Defaults to `15000` for the `fetch` provider and `30000` for `puppeteer` and `browserless`. Pass `0` to disable the timeout entirely (not recommended for production use).
+<ResponseField name="timeout" type="number">
+  Navigation timeout in milliseconds. Defaults differ by provider:
+
+  | Provider | Default |
+  |---|---|
+  | `FetchProvider` | `15000` ms |
+  | `PuppeteerProvider` | `30000` ms |
+  | `BrowserlessProvider` | `30000` ms |
 </ResponseField>
 
-<ResponseField name="waitUntil" type="'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'" optional>
-  Controls when navigation is considered complete for headless-browser providers. Ignored by the `fetch` provider. Defaults to `'networkidle2'` for both `puppeteer` and `browserless`.
+<ResponseField name="waitUntil" type="'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'">
+  When to consider the navigation complete. Applies only to `PuppeteerProvider` and `BrowserlessProvider` — `FetchProvider` ignores this option since `fetch` has no page lifecycle events.
 
-  <Expandable title="waitUntil values">
-    <ResponseField name="'load'" type="string">
-      Fires when the `load` event is dispatched. Fastest option — does not wait for async scripts.
-    </ResponseField>
-    <ResponseField name="'domcontentloaded'" type="string">
-      Fires when the initial HTML document has been parsed. Faster than `'load'`; useful for server-rendered pages.
-    </ResponseField>
-    <ResponseField name="'networkidle0'" type="string">
-      Waits until there are no more than 0 network connections for at least 500 ms. Best for SPAs with heavy async data fetching.
-    </ResponseField>
-    <ResponseField name="'networkidle2'" type="string">
-      Waits until there are no more than 2 network connections for at least 500 ms. The default — balances thoroughness with speed for most portfolio sites.
-    </ResponseField>
-  </Expandable>
+  | Value | Meaning |
+  |---|---|
+  | `'load'` | Wait for the `load` event to fire |
+  | `'domcontentloaded'` | Wait for `DOMContentLoaded` — faster but JS may not have run |
+  | `'networkidle0'` | Wait until there are zero in-flight network requests for 500 ms |
+  | `'networkidle2'` | Wait until there are ≤ 2 in-flight network requests for 500 ms (default) |
 </ResponseField>
 
 ---
 
-## Custom provider implementation
+## Provider classes
 
-You can implement `BrowserProvider` directly and pass the instance wherever GitResolve accepts a provider — no plugin registration or factory override is required.
+### `FetchProvider`
+
+Uses Node.js built-in `fetch` to download HTML. No extra dependencies, no browser process. Works on any static site or server-rendered page. Does **not** execute JavaScript.
+
+```typescript
+import { FetchProvider } from '@clyrisai/gitresolve';
+
+const provider = new FetchProvider();
+// name === 'fetch'
+// isAvailable() always resolves true
+// cleanup() is a no-op
+```
+
+- **Best for:** Static portfolio sites, GitHub Pages sites, server-rendered Rails/Django/Next.js apps with SSR.
+- **Not suitable for:** SPAs that render links via React, Vue, Angular, or similar client-side routing.
+- Sends a realistic `User-Agent` header (`Mozilla/5.0 (compatible; ClyrisBot/1.0)`) to avoid bot-blocking on common static hosts.
+
+### `PuppeteerProvider`
+
+Launches a headless Chromium browser via [Puppeteer](https://pptr.dev/). One browser instance is reused across multiple `getPageContent` calls within the same provider instance.
+
+```typescript
+import { PuppeteerProvider } from '@clyrisai/gitresolve';
+
+const provider = new PuppeteerProvider();
+// name === 'puppeteer'
+// Requires: npm install puppeteer
+```
+
+<Warning>
+  `puppeteer` is a peer dependency and is **not** installed automatically. Run `npm install puppeteer` to enable this provider. `PuppeteerProvider.isAvailable()` returns `false` when `puppeteer` cannot be imported.
+</Warning>
+
+- Launches Chrome with `--no-sandbox --disable-setuid-sandbox` flags (required for most CI/container environments).
+- Each page is opened in a new tab and closed after `getPageContent` returns.
+- Call `provider.cleanup()` to close the browser and free resources.
+
+### `BrowserlessProvider`
+
+Uses the [Browserless](https://www.browserless.io/) `/content` REST endpoint for full JS rendering without managing a local browser process. Ideal for serverless environments and autoscaled pipelines.
+
+```typescript
+import { BrowserlessProvider } from '@clyrisai/gitresolve';
+
+// Uses BROWSERLESS_URL env var, or defaults to http://localhost:3000
+const provider = new BrowserlessProvider();
+
+// Or pass an explicit base URL
+const provider2 = new BrowserlessProvider('https://chrome.browserless.io');
+// name === 'browserless'
+```
+
+The base URL is resolved in this order:
+1. Constructor argument `baseUrl`
+2. `BROWSERLESS_URL` environment variable
+3. Default: `http://localhost:3000`
+
+`isAvailable()` performs a `GET {baseUrl}/json/version` health check with a 3-second timeout. `cleanup()` is a no-op since the provider is stateless REST.
+
+---
+
+## Custom provider
+
+You can implement your own provider by satisfying the `BrowserProvider` interface. This is useful for injecting a mock in tests or integrating an alternative rendering service.
 
 ```typescript
 import type { BrowserProvider, BrowserProviderOptions } from '@clyrisai/gitresolve';
 
-class MyCustomProvider implements BrowserProvider {
-  readonly name = 'custom';
+class PlaywrightProvider implements BrowserProvider {
+  readonly name = 'playwright';
+
+  private browser: import('playwright').Browser | null = null;
 
   async getPageContent(url: string, options?: BrowserProviderOptions): Promise<string> {
-    // Your fetch or render logic
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(options?.timeout ?? 15000),
-    });
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    const { chromium } = await import('playwright');
+    this.browser ??= await chromium.launch({ headless: true });
+
+    const page = await this.browser.newPage();
+    try {
+      await page.goto(url, {
+        waitUntil: options?.waitUntil ?? 'networkidle',
+        timeout: options?.timeout ?? 30000,
+      });
+      return page.content();
+    } finally {
+      await page.close();
     }
-    return response.text();
   }
 
   async isAvailable(): Promise<boolean> {
-    return true;
+    try {
+      await import('playwright');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async cleanup(): Promise<void> {
-    // Release any resources your implementation holds
+    await this.browser?.close();
+    this.browser = null;
   }
 }
-```
 
-Pass an instance directly to `scrapePortfolio()` or any other GitResolve function that accepts a provider:
-
-```typescript
+// Use directly with scrapePortfolio
 import { scrapePortfolio } from '@clyrisai/gitresolve';
 
-const provider = new MyCustomProvider();
-
+const provider = new PlaywrightProvider();
 try {
   const result = await scrapePortfolio('https://janedoe.dev', provider);
 } finally {
   await provider.cleanup();
 }
 ```
-
-<Tip>
-  Because `isAvailable()` returning `true` is all GitResolve checks before using a provider, you can gate your custom implementation on environment-specific conditions (API keys present, service reachable, etc.) simply by returning `false` when those conditions are not met.
-</Tip>

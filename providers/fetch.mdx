@@ -1,25 +1,25 @@
 ---
-title: "FetchProvider: Zero-Dependency Static Page Fetching"
+title: "Fetch Provider — Lightweight HTML Retrieval | GitResolve"
 sidebarTitle: "Fetch"
-description: "FetchProvider uses Node.js native fetch with no extra dependencies. Best for static portfolio sites and serves as the always-available provider fallback."
+description: "FetchProvider uses Node's built-in fetch to retrieve static HTML with zero dependencies — always available and ideal for GitHub profile pages."
 ---
 
-`FetchProvider` is the simplest way to retrieve page content in GitResolve. It uses the native `fetch` API built into Node.js 18+ to download raw HTML, sending requests under the `ClyrisBot/1.0` user-agent. Because it requires no installed packages and no external services, it is always available and acts as the guaranteed last resort in the auto-detection chain. It handles the majority of static portfolio sites — personal pages, GitHub profile READMEs, and hosted resumes — with no configuration needed.
+`FetchProvider` is the lightest option in GitResolve's provider stack. It uses the `fetch` API that ships with Node.js 18+ to download page HTML over HTTP, without spinning up a browser process or requiring any additional packages. Because no external module needs to be imported, `isAvailable()` always returns `true` — making it the guaranteed fallback at the end of the auto-detection chain.
 
-## When to Use
+## When to use
 
-- **Static portfolio sites** — plain HTML/CSS sites with no client-side rendering
-- **GitHub and GitLab profile pages** — server-rendered profile pages resolve cleanly with a plain HTTP request
-- **Constrained environments** — serverless functions, minimal Docker images, or any place where installing Puppeteer or running a Docker container is not practical
-- **Fallback behaviour** — when you want GitResolve to always succeed regardless of what else is installed
+- **Static portfolio sites** and plain HTML pages that don't rely on client-side rendering
+- **GitHub and GitLab profile pages**, which are server-rendered and work perfectly with a standard HTTP request
+- **Constrained environments** such as serverless functions, edge runtimes, or containers where installing a browser binary is not feasible
+- **Fallback behaviour** when neither Puppeteer nor Browserless is available
 
 <Warning>
-  `FetchProvider` does **not** execute JavaScript. Single-page applications built with React, Vue, Next.js, Nuxt, or similar frameworks will return empty shell HTML rather than the fully rendered content. If your candidate's portfolio site is a JavaScript SPA, use [PuppeteerProvider](/providers/puppeteer) or [BrowserlessProvider](/providers/browserless) instead.
+  `FetchProvider` does **not** execute JavaScript. Single-page applications built with React, Vue, Next.js (client-only), or similar frameworks will return an empty shell or a loading spinner rather than real content. Use [PuppeteerProvider](/providers/puppeteer) or [BrowserlessProvider](/providers/browserless) for those sites.
 </Warning>
 
 ## Installation
 
-No installation is required. `FetchProvider` ships with `@clyrisai/gitresolve` and depends only on the Node.js built-in `fetch` (available in Node 18 and later).
+No installation is required. `FetchProvider` depends only on the native `fetch` global available in Node.js 18 and later. If you have already installed `@clyrisai/gitresolve`, you are ready to go.
 
 ## Usage
 
@@ -29,47 +29,54 @@ No installation is required. `FetchProvider` ships with `@clyrisai/gitresolve` a
 import { FetchProvider } from '@clyrisai/gitresolve';
 
 const provider = new FetchProvider();
-const html = await provider.getPageContent('https://janedoe.dev');
-await provider.cleanup(); // no-op — nothing to release
+
+const html = await provider.getPageContent('https://github.com/torvalds');
+console.log(html.slice(0, 500));
+
+await provider.cleanup(); // no-op, safe to call
 ```
 
-### Via factory
+### Via the factory
 
 ```typescript
 import { createProvider } from '@clyrisai/gitresolve';
 
 const provider = await createProvider('fetch');
+const html = await provider.getPageContent('https://gitlab.com/someone');
 ```
 
-### Via CLI
+### CLI
 
 ```bash
-gitresolve --provider fetch https://janedoe.dev
+gitresolve resolve resume.pdf --provider fetch
 ```
 
 ## Options
 
-Pass a `BrowserProviderOptions` object as the second argument to `getPageContent` to override defaults:
-
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `timeout` | `number` | `15000` | Navigation timeout in milliseconds. The request is aborted if the server does not respond within this window. |
-| `waitUntil` | — | — | Not applicable. `FetchProvider` makes a single HTTP request and returns the response body directly. |
+| `timeout` | `number` | `15000` | Maximum milliseconds to wait for the response before aborting. |
+| `waitUntil` | — | N/A | Not applicable. `FetchProvider` returns the raw HTTP response body as soon as it is fully received. |
+
+### Custom timeout example
 
 ```typescript
-const html = await provider.getPageContent('https://janedoe.dev', {
-  timeout: 8000,
+const html = await provider.getPageContent('https://github.com/torvalds', {
+  timeout: 5000, // abort after 5 seconds
 });
 ```
 
-## Behaviour Details
+## Behaviour details
 
-- **User-Agent**: `Mozilla/5.0 (compatible; ClyrisBot/1.0)` — sent on every request to identify GitResolve traffic and avoid bot detection on sites that block empty user-agents.
-- **Redirects**: followed automatically (`redirect: 'follow'`).
-- **Error handling**: a non-2xx HTTP status throws an `Error` with the status code and status text included in the message.
-- **`isAvailable()`**: always returns `true`.
-- **`cleanup()`**: is a no-op. There is no browser instance or persistent connection to release.
+| Property | Value |
+|---|---|
+| `name` | `'fetch'` |
+| `User-Agent` | `Mozilla/5.0 (compatible; ClyrisBot/1.0)` |
+| Redirect handling | `redirect: 'follow'` — follows all HTTP redirects automatically |
+| Non-2xx responses | Throws `Error: Fetch failed with <status>: <statusText>` |
+| `isAvailable()` | Always resolves to `true` |
+| `cleanup()` | No-op — there are no resources to release |
 
-<Note>
-  `FetchProvider` is the automatic fallback when both Puppeteer and Browserless are unavailable. You do not need to configure anything — GitResolve will reach for it on its own if the other providers cannot be initialised.
-</Note>
+<Info>
+  The `Accept` header is set to `text/html,application/xhtml+xml` on every request, which encourages servers to return a browser-friendly HTML response rather than a JSON or API payload.
+</Info>

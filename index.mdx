@@ -1,71 +1,73 @@
 ---
-title: "GitResolve: Resolve Candidate Profiles from Portfolios & Resumes"
+title: "GitResolve: Turn Candidate Submissions into Git Profiles"
 sidebarTitle: "Home"
-description: "GitResolve turns messy candidate URLs, portfolio sites, and resume PDFs into structured GitHub, GitLab, and Bitbucket profiles and repositories."
+description: "GitResolve resolves portfolio sites, GitHub links, and resume PDFs into structured developer profiles with owned repos, contributions, and confidence scores."
 ---
 
-GitResolve is an npm library and CLI tool built for recruiters and ATS pipelines that need to extract structured developer profiles from raw candidate submissions. Feed it a portfolio URL, a GitHub link, or a resume PDF — it returns a clean, typed result with the candidate's profile, owned repositories, contributions, and external references.
+GitResolve is an npm library and CLI tool that turns messy candidate submissions — portfolio URLs, GitHub links, and resume PDFs — into clean, structured developer profiles. Feed it a URL or a PDF and get back a typed result with the candidate's git identity, owned repositories, contributions, and a confidence score, ready to plug into any recruiting pipeline.
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Resolve your first candidate profile in under two minutes with a single command or API call.
-  </Card>
-  <Card title="Installation" icon="download" href="/installation">
-    Install via npm, pnpm, or yarn — or run instantly with npx, no install required.
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Resolve your first candidate profile in under 2 minutes using the CLI or TypeScript API.
   </Card>
   <Card title="CLI Guide" icon="terminal" href="/cli/overview">
-    Process single URLs, batch CSVs of portfolios, and directories of resume PDFs from the command line.
+    Full reference for all CLI flags, batch processing, output options, and provider selection.
   </Card>
   <Card title="API Reference" icon="code" href="/api/overview">
-    Integrate GitResolve directly into your Node.js or Bun backend with a fully typed TypeScript API.
+    TypeScript API docs for `scrapePortfolio`, `parseResume`, `createProvider`, and all exported types.
+  </Card>
+  <Card title="Browser Providers" icon="globe" href="/providers/overview">
+    Configure fetch, Puppeteer, or Browserless to match your infrastructure and rendering needs.
   </Card>
 </CardGroup>
 
-## How GitResolve works
-
-GitResolve follows a five-stage pipeline to turn raw candidate inputs into structured profiles:
+## What GitResolve Does
 
 <Steps>
-  <Step title="Classify the input">
-    GitResolve identifies whether the input is a portfolio site, git profile, repository URL, resume PDF, resume URL, or LinkedIn link using [`classifyInput`](/api/classify-input).
+  <Step title="Classifies the input">
+    Every input — a URL, a file path, a GitHub link — is classified into a type (`portfolio`, `git_profile`, `repo_url`, `resume_file`, etc.) before any processing begins.
   </Step>
-  <Step title="Fetch page content">
-    For URLs, GitResolve fetches rendered HTML using one of three [browser providers](/providers/overview): native `fetch` (fastest, no dependencies), Puppeteer (full JS rendering), or Browserless (Docker-based, great for CI/CD).
+  <Step title="Fetches or parses the source">
+    Portfolio and profile URLs are scraped using your configured browser provider (fetch, Puppeteer, or Browserless). Resume PDFs are parsed via text extraction and hyperlink annotation extraction.
   </Step>
-  <Step title="Extract git links">
-    All GitHub, GitLab, and Bitbucket URLs are extracted from page HTML — both from `href` attributes and raw text. For resume PDFs, both text content and embedded hyperlink annotations are parsed.
+  <Step title="Extracts all git links">
+    Every GitHub, GitLab, and Bitbucket URL found in the page HTML or PDF content is extracted and classified as a profile, repo, pull request, issue, or gist.
   </Step>
-  <Step title="Disambiguate ownership">
-    The [disambiguation engine](/concepts/disambiguation) cross-references profile links with repo owners to determine which GitHub account belongs to the candidate — with a `high`, `medium`, `low`, or `none` confidence score.
+  <Step title="Disambiguates ownership">
+    A cross-referencing algorithm determines which profile belongs to the candidate, separating owned repos from external references and contributions.
   </Step>
-  <Step title="Return a structured result">
-    Every resolved candidate gets a [`ResolverResult`](/api/types) containing their profile, owned repos, contributions (PRs and issues), and external references. Multiple sources for the same candidate are merged into an [`AggregatedResult`](/api/types).
+  <Step title="Returns a typed result">
+    Every call returns a `ResolverResult` with `ownerProfile`, `confidence`, `ownedRepos`, `contributions`, `externalRepos`, `allLinks`, and `warnings`.
   </Step>
 </Steps>
 
-## Supported input types
+## Supported Input Types
 
-| Input | Example | What GitResolve does |
+| Input | Example | What Happens |
 |---|---|---|
 | **Portfolio site** | `https://janedoe.dev` | Scrapes page for git links |
 | **GitHub profile** | `https://github.com/janedoe` | Scrapes profile, discovers repos |
 | **GitLab profile** | `https://gitlab.com/janedoe` | Scrapes profile, handles `/users/` routes |
 | **Bitbucket profile** | `https://bitbucket.org/janedoe` | Scrapes profile page |
-| **Repository URL** | `https://github.com/user/repo` | Scrapes repo page, resolves owner |
-| **PR / Issue URL** | `https://github.com/user/repo/pull/42` | Extracts as a contribution |
-| **Resume PDF** | `./resume.pdf` or HTTPS URL | Extracts text + hyperlink annotations |
+| **Repo URL** | `https://github.com/user/repo` | Scrapes repo page, resolves owner |
+| **PR / Issue URL** | `https://github.com/user/repo/pull/42` | Extracted as a contribution |
+| **Resume PDF** | `./resume.pdf` or remote URL | Extracts text + hyperlink annotations |
+
+## Browser Providers
+
+GitResolve supports three strategies for fetching page content. The right choice depends on your infrastructure:
+
+| Provider | JS Rendering | Best For |
+|---|---|---|
+| `puppeteer` | ✅ Full | SPAs, JavaScript-heavy portfolio sites |
+| `browserless` | ✅ Full | Server environments, CI/CD pipelines |
+| `fetch` | ❌ None | Static sites, always-available fallback |
 
 <CardGroup cols={2}>
-  <Card title="Input Classification" icon="filter" href="/concepts/input-classification">
-    Learn how GitResolve determines the type of each input and what happens next.
+  <Card title="Concepts" icon="lightbulb" href="/concepts/input-classification">
+    Learn how GitResolve classifies inputs, disambiguates candidates, and structures results.
   </Card>
-  <Card title="Disambiguation" icon="user-check" href="/concepts/disambiguation">
-    Understand the cross-referencing algorithm that identifies the candidate's actual profile.
-  </Card>
-  <Card title="Result Structure" icon="brackets-curly" href="/concepts/result-structure">
-    Explore every field in `ResolverResult` and `AggregatedResult`.
-  </Card>
-  <Card title="Browser Providers" icon="globe" href="/providers/overview">
-    Choose between fetch, Puppeteer, and Browserless to match your environment.
+  <Card title="Installation" icon="package" href="/installation">
+    Install via npm, pnpm, yarn, or bun — or run on-demand with npx.
   </Card>
 </CardGroup>

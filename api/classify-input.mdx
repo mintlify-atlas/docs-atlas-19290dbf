@@ -1,16 +1,14 @@
 ---
-title: "classifyInput, parseRepoUrl, parseGitLink — Classifier API"
+title: "Classifier Functions — classifyInput, parseRepoUrl & More"
 sidebarTitle: "Classifier"
-description: "Five exported classifier functions for detecting input types, parsing repo URLs, extracting git links from text or HTML, and checking if a URL is a git provider."
+description: "Reference for all five GitResolve classifier exports: classifyInput, parseRepoUrl, parseGitLink, extractGitUrlsFromText, and isGitProviderUrl."
 ---
 
-The classifier module is the foundation of GitResolve's input pipeline. It provides five focused functions that collectively handle every input shape a candidate might supply — from a bare file path like `resume.pdf` to a deeply-nested GitLab merge request URL. These functions are synchronous, dependency-free, and safe to call at high volume without any browser or network overhead.
-
----
+The classifier module is the entry point for every string that flows into GitResolve. It answers two questions: _what kind of thing is this input?_ and _what structured data can be extracted from it?_ All five functions are pure and synchronous — they never perform network requests, making them safe to call in hot paths or batch loops without any async overhead.
 
 ## `classifyInput`
 
-Inspects a raw string and returns a single `InputType` label describing what kind of input it represents. This is typically the first call in a resolution pipeline, used to route inputs to the appropriate downstream handler.
+Examines a raw string and returns an `InputType` indicating what kind of candidate input it represents. This is the quickest way to route an unknown string before deciding which heavier pipeline function to invoke.
 
 ```typescript
 function classifyInput(input: string): InputType
@@ -19,45 +17,45 @@ function classifyInput(input: string): InputType
 ### Parameters
 
 <ParamField path="input" type="string" required>
-  The raw input string to classify. Can be a URL, file path, or any other string. Leading and trailing whitespace is trimmed automatically before classification.
+  Any string — a URL, file path, or arbitrary text. The value is trimmed before classification.
 </ParamField>
 
-### Return value
+### Returns
 
-Returns an `InputType` string literal — one of:
+An `InputType` string literal. The classification logic runs in this order:
 
-<ResponseField name="InputType" type='"repo_url" | "git_profile" | "portfolio" | "resume_file" | "resume_url" | "linkedin" | "unknown"'>
-  | Value | Meaning |
-  |---|---|
-  | `repo_url` | A valid GitHub, GitLab, or Bitbucket repository URL |
-  | `git_profile` | A profile URL on a supported git host (single path segment) |
-  | `portfolio` | Any other valid URL (assumed to be a personal site) |
-  | `resume_file` | A local file path ending in `.pdf`, `.doc`, `.docx`, or `.rtf` |
-  | `resume_url` | Reserved for future use — a URL pointing to a hosted resume |
-  | `linkedin` | A `linkedin.com` URL (flagged for exclusion, not processed) |
-  | `unknown` | Not a valid URL and not a recognized file extension |
-</ResponseField>
+| Returned value | Condition |
+|---|---|
+| `"resume_file"` | Input ends with `.pdf`, `.doc`, `.docx`, or `.rtf` (case-insensitive) |
+| `"linkedin"` | Parsed hostname contains `linkedin.com` |
+| `"repo_url"` | `parseRepoUrl` returns `valid: true` for the input |
+| `"git_profile"` | Host is a known git provider but `parseRepoUrl` is invalid (e.g. profile-only path) |
+| `"portfolio"` | Any other syntactically valid URL |
+| `"unknown"` | Not a valid URL and not a recognised file extension |
+
+<Note>
+  `"resume_url"` is a valid `InputType` value but `classifyInput` never returns it — the classifier has no way to distinguish a remote PDF URL from any other portfolio URL without fetching the content. Downstream logic may promote `"portfolio"` to `"resume_url"` after inspecting `Content-Type`.
+</Note>
 
 ### Examples
 
 ```typescript
-classifyInput('https://github.com/janedoe')        // 'git_profile'
-classifyInput('https://github.com/janedoe/myapp')  // 'repo_url'
-classifyInput('https://janedoe.dev')               // 'portfolio'
-classifyInput('./resume.pdf')                      // 'resume_file'
-classifyInput('https://linkedin.com/in/janedoe')   // 'linkedin'
-classifyInput('not-a-url')                         // 'unknown'
-```
+import { classifyInput } from '@clyrisai/gitresolve';
 
-<Tip>
-  `classifyInput` trims whitespace from both ends of the input before evaluating it, so `"  https://github.com/octocat  "` classifies identically to `"https://github.com/octocat"`. File extension matching is case-insensitive, so `Resume.PDF` and `resume.pdf` both return `resume_file`. The `www.` prefix is handled transparently for all supported git hosts.
-</Tip>
+classifyInput('https://github.com/torvalds/linux');    // 'repo_url'
+classifyInput('https://github.com/torvalds');          // 'git_profile'
+classifyInput('https://janedoe.dev');                  // 'portfolio'
+classifyInput('./resumes/janedoe.pdf');                // 'resume_file'
+classifyInput('janedoe.docx');                         // 'resume_file'
+classifyInput('https://linkedin.com/in/janedoe');      // 'linkedin'
+classifyInput('not a url at all');                     // 'unknown'
+```
 
 ---
 
 ## `parseRepoUrl`
 
-Validates and parses a URL as a repository link for GitHub, GitLab, or Bitbucket. Returns a structured result indicating whether the URL is a valid repo URL and, if so, the parsed components including provider, owner, repo name, and any PR or issue contribution metadata.
+Fully parses a GitHub, GitLab, or Bitbucket repository URL into structured fields. Strips `.git` suffixes and trailing slashes, handles GitLab sub-group paths, and detects pull request / issue contribution links.
 
 ```typescript
 function parseRepoUrl(repoUrl: string): {
@@ -70,75 +68,143 @@ function parseRepoUrl(repoUrl: string): {
 ### Parameters
 
 <ParamField path="repoUrl" type="string" required>
-  A URL string to validate and parse as a repository URL. Must include a protocol (`https://`). Strings that cannot be parsed as URLs return `{ valid: false, error: "Invalid URL" }`.
+  An absolute URL. Must be parseable by the WHATWG `URL` constructor and hosted on `github.com`, `gitlab.com`, or `bitbucket.org`. The `www.` subdomain variant is **not** accepted by `parseRepoUrl` (use `parseGitLink` for that).
 </ParamField>
 
-### Return value
+### Returns
 
-<ResponseField name="valid" type="boolean" required>
-  `true` if the URL resolves to a recognized repository path on a supported provider. `false` for invalid URLs, unsupported hosts, profile-only paths, or reserved system paths.
+<ResponseField name="valid" type="boolean">
+  `true` when parsing succeeded and `data` is populated; `false` otherwise.
 </ResponseField>
 
 <ResponseField name="data" type="ParsedRepo">
-  Present when `valid` is `true`. Contains the fully parsed repository details.
+  Present only when `valid` is `true`.
 
-  ```typescript
-  interface ParsedRepo {
-    provider: GitProvider;   // 'github' | 'gitlab' | 'bitbucket'
-    host: string;            // e.g. 'github.com'
-    owner: string;           // e.g. 'facebook'
-    repo: string;            // e.g. 'react'
-    fullPath: string;        // e.g. 'facebook/react'
-    normalized: string;      // e.g. 'https://github.com/facebook/react'
-    contribution?: {
-      type: 'pull_request' | 'issue';
-      number: string;
-    };
-  }
-  ```
+  <Expandable title="ParsedRepo fields">
+    <ResponseField name="provider" type="'github' | 'gitlab' | 'bitbucket'">
+      Which git hosting service the URL belongs to.
+    </ResponseField>
+    <ResponseField name="host" type="string">
+      Lowercase hostname, e.g. `"github.com"`.
+    </ResponseField>
+    <ResponseField name="owner" type="string">
+      Repository owner username or organisation.
+    </ResponseField>
+    <ResponseField name="repo" type="string">
+      Repository name (last meaningful path segment after group resolution).
+    </ResponseField>
+    <ResponseField name="fullPath" type="string">
+      `owner/repo` for GitHub and Bitbucket. For GitLab this is the full group path, e.g. `"myorg/backend/api-service"`.
+    </ResponseField>
+    <ResponseField name="normalized" type="string">
+      Canonical URL reconstructed as `https://{host}/{fullPath}` — `.git` suffixes and trailing slashes removed.
+    </ResponseField>
+    <ResponseField name="contribution" type="object | undefined">
+      Present when the URL points to a specific PR or issue.
+
+      <Expandable title="contribution fields">
+        <ResponseField name="type" type="'pull_request' | 'issue'">
+          Whether this is a pull request (GitLab: merge request) or an issue.
+        </ResponseField>
+        <ResponseField name="number" type="string">
+          The numeric identifier as a string, e.g. `"42"`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
 </ResponseField>
 
 <ResponseField name="error" type="string">
-  Present when `valid` is `false`. One of: `"Invalid URL"`, `"Unsupported provider"`, `"Invalid repo path"`, `"Reserved path"`, or `"Invalid GitLab repo path"`.
+  Present only when `valid` is `false`. Possible values:
+
+  | Error string | Cause |
+  |---|---|
+  | `"Unsupported provider"` | Hostname is not `github.com`, `gitlab.com`, or `bitbucket.org` |
+  | `"Invalid repo path"` | Fewer than two path segments after stripping `.git` and slashes |
+  | `"Reserved path"` | First path segment is a provider-specific reserved word (e.g. `explore`, `settings`) |
+  | `"Invalid GitLab repo path"` | GitLab path found a stop marker (`-`, `tree`, `blob`) before reaching `owner/repo` |
+  | `"Invalid URL"` | Input is not a valid URL at all |
 </ResponseField>
 
-### Parsing behavior
+### Behavior notes
 
-- Strips `.git` suffix and trailing slashes before parsing path segments
-- On **GitHub** and **Bitbucket**: owner is `parts[0]`, repo is `parts[1]`
-- On **GitLab**: supports nested subgroups (`group/subgroup/project`) — `owner` is the first segment, `repo` is the last segment before a `-` / `tree` / `blob` marker, and `fullPath` contains the full namespace
-- Detects contribution context from URL suffixes: `/pull/42` and `/issues/5` on GitHub; `/merge_requests/3` and `/issues/2` on GitLab; `/pull-requests/7` and `/issues/4` on Bitbucket
-- Rejects reserved system paths on each provider (e.g. `/features`, `/explore`, `/login` on GitHub)
+- **`.git` stripping** — `https://github.com/owner/repo.git` is treated identically to `https://github.com/owner/repo`.
+- **GitLab sub-groups** — The parser walks path segments until it hits a stop marker (`-`, `tree`, or `blob`), so `https://gitlab.com/myorg/backend/api-service` correctly produces `owner: "myorg"`, `repo: "api-service"`, `fullPath: "myorg/backend/api-service"`.
+- **Contribution detection** differs by provider:
+  - GitHub: `/pull/{n}` → `pull_request`; `/issues/{n}` → `issue`
+  - GitLab: `/-/merge_requests/{n}` → `pull_request`; `/-/issues/{n}` → `issue`
+  - Bitbucket: `/pull-requests/{n}` → `pull_request`; `/issues/{n}` → `issue`
 
 ### Examples
 
-```typescript
-parseRepoUrl('https://github.com/facebook/react')
-// { valid: true, data: { provider: 'github', owner: 'facebook', repo: 'react',
-//   fullPath: 'facebook/react', normalized: 'https://github.com/facebook/react' } }
+<CodeGroup>
+```typescript GitHub
+import { parseRepoUrl } from '@clyrisai/gitresolve';
 
-parseRepoUrl('https://github.com/user/repo/pull/42')
-// { valid: true, data: { ..., contribution: { type: 'pull_request', number: '42' } } }
+const result = parseRepoUrl('https://github.com/owner/my-repo.git');
+// {
+//   valid: true,
+//   data: {
+//     provider: 'github',
+//     host: 'github.com',
+//     owner: 'owner',
+//     repo: 'my-repo',
+//     fullPath: 'owner/my-repo',
+//     normalized: 'https://github.com/owner/my-repo',
+//   }
+// }
+```
 
-parseRepoUrl('https://gitlab.com/group/subgroup/project')
-// { valid: true, data: { provider: 'gitlab', owner: 'group', repo: 'project',
-//   fullPath: 'group/subgroup/project', normalized: 'https://gitlab.com/group/subgroup/project' } }
+```typescript GitLab sub-group
+import { parseRepoUrl } from '@clyrisai/gitresolve';
 
-parseRepoUrl('https://github.com/features')
+const result = parseRepoUrl('https://gitlab.com/myorg/backend/api-service');
+// {
+//   valid: true,
+//   data: {
+//     provider: 'gitlab',
+//     host: 'gitlab.com',
+//     owner: 'myorg',
+//     repo: 'api-service',
+//     fullPath: 'myorg/backend/api-service',
+//     normalized: 'https://gitlab.com/myorg/backend/api-service',
+//   }
+// }
+```
+
+```typescript Pull request
+import { parseRepoUrl } from '@clyrisai/gitresolve';
+
+const result = parseRepoUrl('https://github.com/facebook/react/pull/28987');
+// {
+//   valid: true,
+//   data: {
+//     provider: 'github',
+//     owner: 'facebook',
+//     repo: 'react',
+//     fullPath: 'facebook/react',
+//     normalized: 'https://github.com/facebook/react',
+//     contribution: { type: 'pull_request', number: '28987' },
+//   }
+// }
+```
+
+```typescript Invalid
+import { parseRepoUrl } from '@clyrisai/gitresolve';
+
+parseRepoUrl('https://github.com/settings/profile');
 // { valid: false, error: 'Reserved path' }
 
-parseRepoUrl('https://github.com/user')
-// { valid: false, error: 'Invalid repo path' }
-
-parseRepoUrl('not-a-url')
-// { valid: false, error: 'Invalid URL' }
+parseRepoUrl('https://example.com/owner/repo');
+// { valid: false, error: 'Unsupported provider' }
 ```
+</CodeGroup>
 
 ---
 
 ## `parseGitLink`
 
-Inspects a single URL and, if it belongs to a supported git provider, returns a fully typed `ExtractedGitLink` describing what kind of git entity it points to. Returns `null` for non-git URLs, invalid inputs, reserved paths, and static asset URLs.
+Classifies a raw URL from any of the six recognised git provider hostnames into a typed `ExtractedGitLink`. Unlike `parseRepoUrl`, this function also handles profile pages, gists, PRs, issues, and the `www.` subdomain variants.
 
 ```typescript
 function parseGitLink(rawUrl: string): ExtractedGitLink | null
@@ -147,74 +213,88 @@ function parseGitLink(rawUrl: string): ExtractedGitLink | null
 ### Parameters
 
 <ParamField path="rawUrl" type="string" required>
-  Any URL string. Non-git-provider URLs and malformed URLs both return `null` without throwing.
+  An absolute URL string. Must be parseable by the WHATWG `URL` constructor. Relative URLs return `null`.
 </ParamField>
 
-### Return value
+### Returns
 
-<ResponseField name="ExtractedGitLink | null" type="object | null">
-  Returns `null` when the URL is not from a recognized git provider, is a reserved system path, or ends with a static asset extension (`.png`, `.xml`, `.svg`, `.js`, `.css`, `.json`, `.ico`, `.txt`, `.woff`, `.woff2`, `.ttf`, `.map`).
+An `ExtractedGitLink` object, or `null` when the URL should be discarded.
 
-  When a valid git link is detected, returns:
-
-  ```typescript
-  interface ExtractedGitLink {
-    url: string;           // normalized URL (or raw URL for PRs/issues)
-    provider: GitProvider; // 'github' | 'gitlab' | 'bitbucket'
-    type: GitLinkType;     // 'profile' | 'repo' | 'gist' | 'pull_request' | 'issue' | 'other'
-    username: string;      // extracted username or owner
-    repo?: string;         // repo name, present when type is 'repo', 'pull_request', or 'issue'
-    number?: string;       // PR or issue number, present when type is 'pull_request' or 'issue'
-  }
-  ```
+<ResponseField name="url" type="string">
+  For repo links this is the `normalized` canonical URL from `parseRepoUrl`. For PR/issue links this is the original `rawUrl` to preserve the exact contribution reference. For profile and gist links this is `rawUrl` as-is.
+</ResponseField>
+<ResponseField name="provider" type="'github' | 'gitlab' | 'bitbucket'">
+  Resolved from the hostname via `GIT_HOSTS`.
+</ResponseField>
+<ResponseField name="type" type="GitLinkType">
+  The classification result. See the table below.
+</ResponseField>
+<ResponseField name="username" type="string">
+  The extracted owner username (first path segment, or second segment for gists on `gist.github.com`).
+</ResponseField>
+<ResponseField name="repo" type="string | undefined">
+  Present when `type` is `'repo'`, `'pull_request'`, or `'issue'`.
+</ResponseField>
+<ResponseField name="number" type="string | undefined">
+  Present when `type` is `'pull_request'` or `'issue'`.
 </ResponseField>
 
 ### Classification logic
 
-`parseGitLink` internally delegates to `parseRepoUrl` for multi-segment paths and applies additional rules for edge cases:
+| `type` result | Condition |
+|---|---|
+| `"gist"` | Host is `gist.github.com` or first path segment is `gist` |
+| `"profile"` | Only one path segment present; or second segment is a GitHub profile tab (`repositories`, `stars`, `followers`, `following`); or GitLab second segment is `-` |
+| `"pull_request"` | `parseRepoUrl` returns a `contribution` of type `pull_request` |
+| `"issue"` | `parseRepoUrl` returns a `contribution` of type `issue` |
+| `"repo"` | Two or more valid path segments that pass `parseRepoUrl` |
+| `"other"` | Two or more path segments that did not match any of the above |
 
-- **Single path segment** → `type: "profile"` (e.g. `github.com/janedoe`)
-- **Two or more segments** → `type: "repo"` by default, unless a more specific rule matches
-- **GitHub profile tabs** (`/repositories`, `/stars`, `/followers`, `/following`) → `type: "profile"` (the tab suffix is discarded, ownership is attributed to the username)
-- **GitLab `/user/-`** → `type: "profile"` (the `-` is GitLab's internal namespace separator, not a repo name)
-- **PR / issue suffixes** → `type: "pull_request"` or `type: "issue"` with the numeric `number` field populated
-- **`gist.github.com`** or paths starting with `gist` → `type: "gist"`
-- **Reserved paths** (e.g. `github.com/features`, `gitlab.com/explore`) → `null`
-- **Static assets** (any final segment with a recognized asset extension) → `null`
+### Null cases
+
+`parseGitLink` returns `null` (silently discards the URL) when:
+
+- The URL cannot be parsed, or the hostname is not in `GIT_HOSTS`
+- The last path segment ends with a static asset extension: `.png`, `.svg`, `.xml`, `.json`, `.ico`, `.txt`, `.woff`, `.woff2`, `.ttf`, `.css`, `.js`, `.map`
+- The first path segment matches a reserved system path for that provider (e.g. `features`, `settings`, `explore`, `admin`)
+- No path segments at all (bare host URL)
 
 ### Examples
 
 ```typescript
-parseGitLink('https://github.com/janedoe')
-// { url: 'https://github.com/janedoe', provider: 'github', type: 'profile', username: 'janedoe' }
+import { parseGitLink } from '@clyrisai/gitresolve';
 
-parseGitLink('https://github.com/janedoe/myapp')
-// { url: 'https://github.com/janedoe/myapp', provider: 'github', type: 'repo',
-//   username: 'janedoe', repo: 'myapp' }
+// Profile
+parseGitLink('https://github.com/torvalds');
+// { url: 'https://github.com/torvalds', provider: 'github', type: 'profile', username: 'torvalds' }
 
-parseGitLink('https://github.com/janedoe/repositories')
-// { url: '...', provider: 'github', type: 'profile', username: 'janedoe' }
+// Repo
+parseGitLink('https://github.com/vercel/next.js');
+// { url: 'https://github.com/vercel/next.js', provider: 'github', type: 'repo', username: 'vercel', repo: 'next.js' }
 
-parseGitLink('https://github.com/user/repo/pull/42')
-// { url: '...', provider: 'github', type: 'pull_request',
-//   username: 'user', repo: 'repo', number: '42' }
+// Gist
+parseGitLink('https://gist.github.com/sindresorhus/abc123');
+// { url: '...', provider: 'github', type: 'gist', username: 'sindresorhus' }
 
-parseGitLink('https://gitlab.com/group/project/-/merge_requests/3')
-// { url: '...', provider: 'gitlab', type: 'pull_request',
-//   username: 'group', repo: 'project', number: '3' }
+// Pull request
+parseGitLink('https://github.com/facebook/react/pull/28987');
+// { url: '...', provider: 'github', type: 'pull_request', username: 'facebook', repo: 'react', number: '28987' }
 
-parseGitLink('https://github.com/explore')
-// null  (reserved path)
+// Static asset — silently discarded
+parseGitLink('https://github.com/some/repo/logo.png'); // null
 
-parseGitLink('https://example.com')
-// null  (not a git provider)
+// Non-git host — silently discarded
+parseGitLink('https://example.com/user/repo');          // null
+
+// Reserved path — silently discarded
+parseGitLink('https://github.com/settings/profile');    // null
 ```
 
 ---
 
 ## `extractGitUrlsFromText`
 
-Scans a block of raw text for any GitHub, GitLab, or Bitbucket URLs — with or without an `https://` prefix — and returns a deduplicated, normalized array of those URLs. Useful for processing PDF text extracts, HTML source, or any freeform text that may contain embedded git links.
+Scans a block of plain text (or raw HTML) with a regex and returns every unique git provider URL it finds. This is used internally by `parseResume` and `extractLinksFromHtml`.
 
 ```typescript
 function extractGitUrlsFromText(text: string): string[]
@@ -223,48 +303,46 @@ function extractGitUrlsFromText(text: string): string[]
 ### Parameters
 
 <ParamField path="text" type="string" required>
-  Any raw text content. The function applies a regex scan across the full string, so it handles multi-line content, HTML, and PDF text extractions equally.
+  Any arbitrary string — resume text, raw HTML, a markdown document, etc.
 </ParamField>
 
-### Return value
+### Returns
 
-<ResponseField name="string[]" type="array">
-  A deduplicated array of normalized git URLs. Each URL is guaranteed to start with `https://` (or `http://` if the original used that scheme) and has no trailing slash. Returns an empty array if no git URLs are found.
-</ResponseField>
+An array of unique, normalised URL strings. Each returned value:
 
-### Normalization behavior
-
-- Matches `github.com`, `gitlab.com`, and `bitbucket.org` URLs, with optional `www.` prefix and optional `https://` or `http://` scheme
-- Adds `https://` prefix to any bare URL that lacks a scheme (e.g. `github.com/user`)
-- Strips trailing slashes from all matched URLs
-- Deduplicates the result using a `Set` — identical normalized URLs appear exactly once
+- Has an `https://` prefix (bare `github.com/...` fragments are promoted)
+- Has trailing slashes stripped
+- Appears only once (the array is deduplicated before returning)
+- Matches only `github.com`, `gitlab.com`, or `bitbucket.org` hostnames
 
 <Note>
-  The regex matches up to two path segments deep (e.g. `github.com/user` and `github.com/user/repo`). Deeper paths such as PR URLs or branch references are not captured by `extractGitUrlsFromText`. Use `parseGitLink` after extracting if you need full classification including PRs and issues.
+  The regex captures at most **two path segments** beyond the hostname, so `https://github.com/owner/repo` is captured but `https://github.com/owner/repo/blob/main/README.md` is truncated to `https://github.com/owner/repo`. This is intentional — deeper paths are not useful for profile resolution and create noise.
 </Note>
 
-### Example
+### Examples
 
 ```typescript
-extractGitUrlsFromText('My GitHub: github.com/janedoe and project: github.com/janedoe/app')
-// ['https://github.com/janedoe', 'https://github.com/janedoe/app']
+import { extractGitUrlsFromText } from '@clyrisai/gitresolve';
 
-extractGitUrlsFromText(`
-  GitHub: https://github.com/johndoe
-  GitLab: https://gitlab.com/johndoe/api
-  Bitbucket: https://bitbucket.org/team/project
-`)
-// ['https://github.com/johndoe', 'https://gitlab.com/johndoe/api', 'https://bitbucket.org/team/project']
+const text = `
+  Check out my projects at github.com/janedoe and
+  https://gitlab.com/janedoe/api-service.
+  I also contributed to https://github.com/facebook/react/pull/42.
+`;
 
-extractGitUrlsFromText('No relevant links here: https://example.com')
-// []
+extractGitUrlsFromText(text);
+// [
+//   'https://github.com/janedoe',
+//   'https://gitlab.com/janedoe/api-service',
+//   'https://github.com/facebook/react',  // truncated at 2 segments
+// ]
 ```
 
 ---
 
 ## `isGitProviderUrl`
 
-A lightweight guard that checks whether a URL's hostname is one of the six recognized git provider hostnames. Useful for quick pre-filtering before calling heavier parsers.
+Returns `true` if and only if the URL's hostname is one of the six recognised git provider hostnames. Useful as a fast filter before calling heavier parsing functions.
 
 ```typescript
 function isGitProviderUrl(link: string): boolean
@@ -273,44 +351,66 @@ function isGitProviderUrl(link: string): boolean
 ### Parameters
 
 <ParamField path="link" type="string" required>
-  Any URL string. Malformed URLs that cannot be parsed return `false` without throwing.
+  An absolute URL string. Invalid URLs return `false` rather than throwing.
 </ParamField>
 
-### Return value
+### Returns
 
-<ResponseField name="boolean" type="boolean">
-  `true` if the URL's hostname exactly matches one of the recognized entries in `GIT_HOSTS`: `github.com`, `www.github.com`, `gitlab.com`, `www.gitlab.com`, `bitbucket.org`, or `www.bitbucket.org`. `false` for any other hostname, invalid URL, or empty string.
-</ResponseField>
+`true` if the hostname is in `GIT_HOSTS`, `false` otherwise.
 
-### Example
+The six recognised hostnames are:
+
+| Hostname | Provider |
+|---|---|
+| `github.com` | `github` |
+| `www.github.com` | `github` |
+| `gitlab.com` | `gitlab` |
+| `www.gitlab.com` | `gitlab` |
+| `bitbucket.org` | `bitbucket` |
+| `www.bitbucket.org` | `bitbucket` |
+
+### Examples
 
 ```typescript
-isGitProviderUrl('https://github.com/user/repo')    // true
-isGitProviderUrl('https://www.gitlab.com/user')     // true
-isGitProviderUrl('https://bitbucket.org/team/proj') // true
-isGitProviderUrl('https://linkedin.com/in/user')    // false
-isGitProviderUrl('https://example.com')             // false
-isGitProviderUrl('not-a-url')                       // false
+import { isGitProviderUrl } from '@clyrisai/gitresolve';
+
+isGitProviderUrl('https://github.com/torvalds/linux');  // true
+isGitProviderUrl('https://www.github.com/torvalds');    // true
+isGitProviderUrl('https://bitbucket.org/owner/repo');   // true
+isGitProviderUrl('https://example.com/owner/repo');     // false
+isGitProviderUrl('not-a-url');                          // false
 ```
 
-<Tip>
-  `isGitProviderUrl` only checks the hostname — it does not validate the path. A URL like `https://github.com/features` returns `true` even though `parseGitLink` would return `null` for it (reserved path). Use this function only for provider-level pre-filtering, not full URL validation.
-</Tip>
+---
 
-### The `GIT_HOSTS` constant
+## `GIT_HOSTS`
 
-`isGitProviderUrl` checks membership against the exported `GIT_HOSTS` map. You can import and use this constant directly if you need to enumerate or extend recognized hostnames in your own logic.
+A constant lookup map from hostname string to `GitProvider`. Exported for cases where you need to check or iterate the recognised hosts without importing `isGitProviderUrl`.
 
 ```typescript
 import { GIT_HOSTS } from '@clyrisai/gitresolve';
 
-console.log(GIT_HOSTS);
-// {
-//   'github.com':        'github',
-//   'www.github.com':    'github',
-//   'gitlab.com':        'gitlab',
-//   'www.gitlab.com':    'gitlab',
-//   'bitbucket.org':     'bitbucket',
-//   'www.bitbucket.org': 'bitbucket',
-// }
+// Type: Record<string, GitProvider>
+// Value:
+{
+  'github.com':         'github',
+  'www.github.com':     'github',
+  'gitlab.com':         'gitlab',
+  'www.gitlab.com':     'gitlab',
+  'bitbucket.org':      'bitbucket',
+  'www.bitbucket.org':  'bitbucket',
+}
+```
+
+### Usage
+
+```typescript
+import { GIT_HOSTS } from '@clyrisai/gitresolve';
+
+const hostname = new URL(someUrl).hostname.toLowerCase();
+const provider = GIT_HOSTS[hostname]; // 'github' | 'gitlab' | 'bitbucket' | undefined
+
+if (provider) {
+  console.log(`This is a ${provider} URL`);
+}
 ```

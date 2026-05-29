@@ -1,55 +1,59 @@
 ---
-title: "Install GitResolve via npm, pnpm, or npx"
+title: "Install GitResolve: CLI and npm Package Setup Guide"
 sidebarTitle: "Installation"
-description: "Install @clyrisai/gitresolve globally, as a project dependency, or run it on-demand with npx. Requires Node.js 18 or higher."
+description: "Install GitResolve via npx, global CLI, or npm project dependency. Covers Node.js 18+ requirements, TypeScript types, browser providers, and env vars."
 ---
 
-GitResolve is published to npm as `@clyrisai/gitresolve` and ships a compiled `dist/` with bundled TypeScript declarations — no separate `@types` package is needed. You can run it immediately with `npx`, install it globally for persistent CLI access, or add it as a project dependency to use the programmatic API inside your application.
+GitResolve ships as a single npm package (`@clyrisai/gitresolve`) that covers both the CLI and the programmatic API. You can run it immediately with `npx`, install it globally for persistent CLI access, or add it as a dependency in your Node.js project. TypeScript types are bundled — no separate `@types` package is required.
 
 ## Requirements
 
-- **Node.js >= 18.0.0** — GitResolve uses native `fetch`, top-level `await`, and ES module syntax that require Node 18 or later.
-- **Puppeteer** — bundled as a dependency. For global CLI installs where Puppeteer may not be pulled in automatically, see [Global Install](#global-install) below.
+GitResolve requires **Node.js >= 18.0.0**. Check your version before installing:
+
+```bash
+node --version
+```
+
+No other system dependencies are required for the fetch or Puppeteer providers. Puppeteer is bundled as a direct dependency and installed automatically. For the Browserless provider, you will need a running Docker container — see the [Browser Providers](/providers/overview) guide.
 
 ## Zero-Install with npx
 
-Run GitResolve without installing anything. Ideal for one-off candidate lookups or quick evaluation.
-
-```bash
-npx @clyrisai/gitresolve https://github.com/janedoe
-```
+Run GitResolve on-demand without a permanent installation. This is the fastest way to try it:
 
 ```bash
 npx @clyrisai/gitresolve --help
 ```
 
-`npx` downloads and caches the package on first run. Subsequent runs use the cached version unless you clear the npx cache.
+```bash
+npx @clyrisai/gitresolve https://github.com/janedoe --json
+```
+
+<Tip>
+  The `npx` approach is ideal for one-off lookups or CI jobs where you don't want to manage a global install. npx will always pull the latest published version.
+</Tip>
 
 ## Global Install
 
-Install globally to add the `gitresolve` command permanently to your `PATH`. This is the recommended approach for anyone using GitResolve frequently from the terminal.
+Install globally to make the `gitresolve` command available in any directory:
 
 ```bash
 npm install -g @clyrisai/gitresolve
 ```
 
-Once installed, the `gitresolve` command is available anywhere on your system:
+After installation, verify it's working:
 
 ```bash
-gitresolve https://github.com/janedoe
-gitresolve ./resumes/candidate.pdf --json
-gitresolve --all --output-dir results/
+gitresolve --version
+gitresolve --help
 ```
 
-For global installs, Puppeteer may not be pulled in automatically depending on your environment. If you want to ensure JavaScript rendering is available for SPA portfolio sites, install Puppeteer explicitly alongside GitResolve:
-
-```bash
-npm install -g @clyrisai/gitresolve puppeteer
-```
+<Note>
+  Puppeteer is bundled as a dependency in the package, so it installs automatically for project-level installs via npm. For global installs, Puppeteer's browser binaries may not be downloaded automatically depending on your npm configuration. If you see errors about a missing Chromium executable when processing JavaScript-heavy portfolio sites, run `npm install -g puppeteer` to install it alongside GitResolve.
+</Note>
 
 ## Project Dependency
 
-Add GitResolve as a dependency when you need the programmatic TypeScript API inside your application. Use whichever package manager your project already uses.
+To use the programmatic API inside your own application, install `@clyrisai/gitresolve` as a project dependency:
 
 <CodeGroup>
 
@@ -71,44 +75,83 @@ bun add @clyrisai/gitresolve
 
 </CodeGroup>
 
-After installing, import directly from the package name:
+Then import the functions you need:
 
 ```typescript
 import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresolve';
 ```
 
-TypeScript types are included at `./dist/index.d.ts` and are resolved automatically by the TypeScript compiler — no `@types/gitresolve` or manual path configuration is required.
+## TypeScript Support
+
+TypeScript types are included in the package at `./dist/index.d.ts`. No `@types/gitresolve` package is needed — types work out of the box after install.
+
+The main types you'll use are exported directly from `@clyrisai/gitresolve`:
+
+```typescript
+import type {
+  InputType,
+  GitProvider,
+  ParsedRepo,
+  GitLinkType,
+  ExtractedGitLink,
+  ResolverResult,
+  BrowserProvider,
+  BrowserProviderOptions,
+  ProviderName,
+} from '@clyrisai/gitresolve';
+```
 
 ## Browser Providers
 
-GitResolve bundles Puppeteer as a dependency, so JavaScript rendering for SPA portfolio sites works out of the box when you install `@clyrisai/gitresolve` as a project dependency. `createProvider()` auto-detects the best available provider at runtime and defaults to Puppeteer when it is available.
+GitResolve's browser provider is used when scraping portfolio websites and git profile pages. The `createProvider()` function auto-selects the best available provider using this resolution order: **puppeteer → browserless → fetch**.
 
-You can also force a specific provider with the `--provider` CLI flag or by passing the provider name to `createProvider()`.
+Puppeteer is included as a bundled dependency, so it is available automatically for project-level installs. For global installs, you may need to install it separately if JavaScript rendering is needed.
 
-For server or CI environments where installing Chromium is undesirable, consider using the [Browserless provider](/providers/overview) instead.
+```bash
+# Force a specific provider via CLI
+gitresolve https://janedoe.dev --provider fetch
+gitresolve https://janedoe.dev --provider puppeteer
+gitresolve https://janedoe.dev --provider browserless
+```
+
+You can also set the preferred provider for the programmatic API:
+
+```typescript
+import { createProvider } from '@clyrisai/gitresolve';
+
+// Explicit provider selection
+const provider = await createProvider('fetch');
+
+// Or let GitResolve auto-select (puppeteer → browserless → fetch)
+const provider = await createProvider();
+```
+
+See the [Browser Providers](/providers/overview) guide for Browserless Docker setup instructions.
 
 ## Environment Variables
 
-GitResolve reads the following environment variables at runtime. All of them are optional — defaults are used when a variable is not set.
+GitResolve reads several environment variables to configure runtime behavior. All of them are optional and have sensible defaults.
 
 | Variable | Default | Description |
 |---|---|---|
-| `BROWSERLESS_URL` | `http://localhost:3000` | URL of your Browserless instance when using the `browserless` provider |
-| `BROWSER_PROVIDER` | *(auto-detect)* | Force a specific provider: `puppeteer`, `browserless`, or `fetch` |
-| `PORTFOLIO_CSV` | `./data/portfolio_links.csv` | Default path to the CSV file used by `--portfolios` and `--all` |
-| `RESUMES_DIR` | `./data/resumes` | Default path to the directory of PDF files used by `--resumes` and `--all` |
+| `BROWSERLESS_URL` | `http://localhost:3000` | URL of a running Browserless instance for the Browserless provider |
+| `BROWSER_PROVIDER` | Auto-detect | Force a specific provider: `puppeteer`, `browserless`, or `fetch` |
+| `PORTFOLIO_CSV` | `./data/portfolio_links.csv` | Path to the CSV file used by `--portfolios` batch mode |
+| `RESUMES_DIR` | `./data/resumes` | Path to the directory of PDF files used by `--resumes` batch mode |
 
-Environment variables can be set in your shell, a `.env` file loaded by your runtime, or passed inline:
+You can set these in a `.env` file, in your shell profile, or inline before the command:
 
 ```bash
-BROWSER_PROVIDER=fetch gitresolve https://janedoe.dev
+BROWSER_PROVIDER=fetch gitresolve https://janedoe.dev --json
 ```
 
-CLI flags take precedence over environment variables when both are provided. For example, `--browserless-url` overrides `BROWSERLESS_URL` and `--provider` overrides `BROWSER_PROVIDER`.
+```bash
+BROWSERLESS_URL=http://my-server:3000 gitresolve --portfolios
+```
 
-## Verifying the Install
+## Verify Your Installation
 
-After installing, confirm the version and that the binary resolves correctly:
+After installing globally, run these two commands to confirm everything is set up correctly:
 
 ```bash
 gitresolve --version
@@ -118,8 +161,8 @@ gitresolve --version
 gitresolve --help
 ```
 
-If you installed globally and the command is not found, ensure your npm global `bin` directory is on your `PATH`. You can find the global bin path with:
+You should see the version number (`0.2.1`) and the full usage output listing all available flags and options.
 
-```bash
-npm bin -g
-```
+<Warning>
+  If `gitresolve` is not found after a global install, your npm global bin directory may not be on your `PATH`. Run `npm bin -g` to find the directory and add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+</Warning>

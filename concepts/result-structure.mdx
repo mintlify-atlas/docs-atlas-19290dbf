@@ -1,60 +1,219 @@
 ---
-title: "GitResolve Result Shape: ResolverResult and AggregatedResult"
+title: "Result Structure: ResolverResult and AggregatedResult"
 sidebarTitle: "Result Structure"
-description: "Every resolve() call returns a typed ResolverResult. Multiple sources for one candidate are merged into a deduplicated AggregatedResult by the CLI."
+description: "Complete field reference for ResolverResult, AggregatedResult, and ExtractedGitLink — the three core output types of GitResolve."
 ---
 
-Every call to `resolve()` returns a `ResolverResult` — a fully typed object that contains the resolved owner profile, categorized repositories, confidence level, raw link data, and diagnostic information. When you pass multiple sources for the same candidate (a portfolio URL plus a resume PDF, for example), GitResolve merges them into an `AggregatedResult` that deduplicates links across sources and surfaces a single consolidated view of the candidate's git presence. Both shapes are described in full below.
+Every resolved source produces a typed output object that captures both what was found and how confident GitResolve is about the result. When you call `scrapePortfolio` or `parseResume` directly, you receive a `ResolverResult` for that single source. When you run the CLI in batch mode across multiple inputs for the same candidate, each candidate's sources are merged into an `AggregatedResult`. Understanding the shape of these objects — including what goes into `warnings`, when `error` appears, and how `ownedRepos` differs from `externalRepos` — lets you build reliable downstream logic on top of GitResolve's output.
+
+## TypeScript import
+
+```typescript
+import type {
+  ResolverResult,
+  AggregatedResult,
+  ExtractedGitLink,
+  InputType,
+  GitProvider,
+  GitLinkType,
+} from "@clyrisai/gitresolve";
+```
 
 ---
 
 ## ResolverResult
 
-`ResolverResult` is the output of resolving a single input source. It is returned by `resolve()` and by the individual scraper and parser functions.
-
-### Fields
+`ResolverResult` is the return type of both `scrapePortfolio` and `parseResume`. It contains everything GitResolve found about one source input.
 
 <ResponseField name="source" type="string" required>
-  The original input string passed to `resolve()` — a URL, a file path, or any other raw input. Preserved exactly as provided, without normalization.
+  The original input string — the URL that was scraped, or the file path that was parsed. Preserved exactly as passed in.
 </ResponseField>
 
 <ResponseField name="sourceType" type="InputType" required>
-  The classification assigned to the input before processing. One of `"repo_url"`, `"git_profile"`, `"portfolio"`, `"resume_file"`, `"resume_url"`, `"linkedin"`, or `"unknown"`. See [Input Classification](/concepts/input-classification) for the full decision flow.
+  The classification assigned by `classifyInput` before processing. One of `'repo_url'`, `'git_profile'`, `'portfolio'`, `'resume_file'`, `'resume_url'`, `'linkedin'`, or `'unknown'`. See [Input Classification](/concepts/input-classification) for the full decision logic.
 </ResponseField>
 
 <ResponseField name="ownerProfile" type="ExtractedGitLink | null" required>
-  The resolved git profile for the candidate, or `null` if no owner could be determined. When `sourceType` is `"git_profile"` or `"repo_url"`, this is extracted directly from the input URL. For `"portfolio"` and `"resume_file"` inputs, it is determined by the [disambiguation algorithm](/concepts/disambiguation).
+  The resolved git profile for the candidate, or `null` if no owner could be determined. When `confidence` is `'none'`, this field is always `null`. See [ExtractedGitLink](#extractedgitlink) below for the shape of this object.
 </ResponseField>
 
-<ResponseField name="confidence" type='"high" | "medium" | "low" | "none"' required>
-  How certain GitResolve is about the `ownerProfile` assignment. See the [Confidence Levels](#confidence-levels) table below.
+<ResponseField name="confidence" type="'high' | 'medium' | 'low' | 'none'" required>
+  How certain GitResolve is about the `ownerProfile` attribution. See the [confidence levels table](#confidence-levels) for the full meaning of each level.
 </ResponseField>
 
 <ResponseField name="ownedRepos" type="ExtractedGitLink[]" required>
-  Repo links found during processing where `link.username` matches the resolved owner username (case-insensitive). These are the candidate's own projects.
+  Repository links where `link.username` matches the resolved owner (case-insensitive). These are repos the candidate owns. Deduplicated by URL.
 </ResponseField>
 
 <ResponseField name="contributions" type="ExtractedGitLink[]" required>
-  Pull request and issue links found during processing. These represent explicit open-source contributions, regardless of which repo they point to.
+  Links with `type === 'pull_request'` or `type === 'issue'`. These represent explicit contribution activity found in the source. Deduplicated by URL.
 </ResponseField>
 
 <ResponseField name="externalRepos" type="ExtractedGitLink[]" required>
-  Repo links where `link.username` does not match the resolved owner. These are references to libraries, employers' codebases, or collaborators' projects.
+  Repository links owned by someone other than the resolved owner. These may be libraries depended on, employer repositories, or open-source projects the candidate referenced without owning. Deduplicated by URL.
 </ResponseField>
 
 <ResponseField name="allLinks" type="ExtractedGitLink[]" required>
-  The complete unfiltered set of `ExtractedGitLink` objects collected during processing, before any categorization. Useful for auditing what was found on a page or in a PDF.
+  The complete, unfiltered set of every parsed git link found in the source — profiles, repos, gists, PRs, issues, and other link types combined. Use this for custom filtering or auditing the raw extraction output.
 </ResponseField>
 
 <ResponseField name="warnings" type="string[]" required>
-  Diagnostic messages produced during processing. Warnings describe the browser provider used, disambiguation decisions, multiple profiles found, tied repo counts, and other noteworthy conditions. Never empty — at minimum a provider or resolution note is included.
+  Non-fatal diagnostic messages logged during processing. This includes the browser provider used, disambiguation decisions and rationale, and edge-case flags. See [The warnings array](#the-warnings-array) for a full description.
 </ResponseField>
 
 <ResponseField name="error" type="string">
-  Set when scraping or parsing throws an unhandled exception. When `error` is present, the other result fields will be in their default empty state. GitResolve never throws — errors are always caught and surfaced here so that a batch of inputs can continue processing even if one source fails.
+  Present only when a fatal error occurred during processing — for example, a network failure fetching the portfolio URL, or a file read error on a resume path. When `error` is set, the other fields (`ownedRepos`, `allLinks`, etc.) will be empty arrays and `confidence` will be `'none'`. See [The error field](#the-error-field) for details.
 </ResponseField>
 
-### Full JSON Example
+---
+
+## ExtractedGitLink
+
+`ExtractedGitLink` is the atomic unit of every link GitResolve extracts. It appears in `ownerProfile`, `ownedRepos`, `contributions`, `externalRepos`, and `allLinks`.
+
+<ResponseField name="url" type="string" required>
+  The canonical URL for this link. For repos, this is the normalized form `https://{host}/{owner}/{repo}`. For PRs and issues, the raw URL (including the PR/issue number path) is preserved. For synthetic profile links (created in Case 3 of disambiguation), this is `https://{host}/{username}`.
+</ResponseField>
+
+<ResponseField name="provider" type="GitProvider" required>
+  The git hosting platform. One of `'github'`, `'gitlab'`, or `'bitbucket'`.
+</ResponseField>
+
+<ResponseField name="type" type="GitLinkType" required>
+  The kind of resource this link points to. See the [GitLinkType values table](#gitlinktype-values) below.
+</ResponseField>
+
+<ResponseField name="username" type="string" required>
+  The username or organization name extracted from the URL path. Used for all ownership matching. Matching is always performed case-insensitively.
+</ResponseField>
+
+<ResponseField name="repo" type="string">
+  The repository name. Present when `type` is `'repo'`, `'pull_request'`, or `'issue'`. Absent for `'profile'` and `'gist'` links.
+</ResponseField>
+
+<ResponseField name="number" type="string">
+  The PR or issue number as a string. Present only when `type` is `'pull_request'` or `'issue'`.
+</ResponseField>
+
+### GitLinkType values
+
+| Value | Description |
+|---|---|
+| `profile` | A user or organization profile page (e.g. `github.com/janedoe`) |
+| `repo` | A repository root (e.g. `github.com/janedoe/my-project`) |
+| `gist` | A GitHub Gist (e.g. `gist.github.com/janedoe/abc123`) |
+| `pull_request` | A pull request or merge request URL including a numeric ID |
+| `issue` | An issue URL including a numeric ID |
+| `other` | A valid git host URL that did not match any of the above patterns |
+
+---
+
+## AggregatedResult
+
+`AggregatedResult` is the output type for CLI batch runs where multiple source inputs (a portfolio URL, a resume PDF, a repo URL) are resolved together for a single candidate. GitResolve merges the individual `ResolverResult` objects, deduplicates links across sources, and picks the highest-confidence owner profile.
+
+<ResponseField name="candidateUsername" type="string | null" required>
+  The final resolved username for this candidate, or `null` if no owner could be determined across any source. Derived from `ownerProfile.username`.
+</ResponseField>
+
+<ResponseField name="sources" type="string[]" required>
+  All input strings that were resolved and merged into this aggregate. For example `["https://janedoe.dev", "./resumes/janedoe.pdf"]`.
+</ResponseField>
+
+<ResponseField name="sourceTypes" type="InputType[]" required>
+  The `InputType` value for each entry in `sources`, in the same order.
+</ResponseField>
+
+<ResponseField name="ownerProfile" type="ExtractedGitLink | null" required>
+  The best owner profile resolved across all sources. When one source yields `confidence: 'high'`, that profile wins. When all sources are lower confidence, the first resolved profile is used.
+</ResponseField>
+
+<ResponseField name="confidence" type="'high' | 'medium' | 'low' | 'none'" required>
+  The highest confidence level achieved across all merged sources.
+</ResponseField>
+
+<ResponseField name="ownedRepos" type="ExtractedGitLink[]" required>
+  Deduplicated union of `ownedRepos` from all sources, filtered to the resolved owner.
+</ResponseField>
+
+<ResponseField name="contributions" type="ExtractedGitLink[]" required>
+  Deduplicated union of `contributions` from all sources.
+</ResponseField>
+
+<ResponseField name="externalRepos" type="ExtractedGitLink[]" required>
+  Deduplicated union of `externalRepos` from all sources.
+</ResponseField>
+
+<ResponseField name="allLinks" type="ExtractedGitLink[]" required>
+  Deduplicated union of `allLinks` from all sources.
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]" required>
+  Combined warnings from all merged `ResolverResult` objects.
+</ResponseField>
+
+---
+
+## Confidence levels
+
+| Level | Meaning |
+|---|---|
+| `high` | The owner was determined with certainty — either from a direct `git_profile`/`repo_url` input, a single unambiguous profile link, or a clear repo-count majority when multiple profiles were present. |
+| `medium` | The owner was inferred rather than directly identified — typically from repo-username frequency when no profile link exists, or from a dominant but not exclusive repo count. |
+| `low` | The owner is a best guess — profiles or repos were found but evidence was tied or contradictory. The first candidate was picked, but downstream code should treat this result with caution. |
+| `none` | No git links were found at all, or the source was a type that cannot be resolved (e.g. `linkedin`). `ownerProfile` is `null`. |
+
+---
+
+## The warnings array
+
+The `warnings` array is always present (never `undefined`) and collects non-fatal diagnostic messages logged throughout processing. These messages are useful for debugging scraper output and understanding disambiguation decisions.
+
+Common warnings you will encounter:
+
+| Warning message pattern | When it appears |
+|---|---|
+| `Used fetch provider (SPA rendering layer …)` | Portfolio was fetched with the fallback `fetch` provider; a headless browser was not available |
+| `Used {name} provider for page content` | Portfolio was fetched with a named browser provider (e.g. Puppeteer, Browserless) |
+| `Found {n} git URL(s) in text content` | Resume text extraction found git URLs |
+| `Text extraction failed: {message}` | The `unpdf` text pass failed; annotation extraction may still succeed |
+| `Annotation extraction failed: {message}` | The `unpdf` annotation pass failed |
+| `Owner strictly determined by profile URL input: {username}` | `knownOwnerProfile` was provided; algorithm was bypassed |
+| `Multiple profile links found: {usernames}` | Case 2 disambiguation was triggered |
+| `Owner determined by repo cross-reference: {scores}` | Case 2 resolved to `high` confidence via repo count comparison |
+| `⚠ Tied repo ownership between profiles: {scores}. Picked {username}.` | Case 2 ended in a tie; `medium` confidence |
+| `None of the profile links match any repo owner — picking first profile` | Case 2 found profiles but zero matching repos; `low` confidence |
+| `Multiple profiles found but no repos to cross-reference — picking first` | Case 2 with no repos at all; `low` confidence |
+| `No profile link found — all repos belong to same user, inferred as owner` | Case 3 single username; `medium` confidence |
+| `No profile link found — inferred from repo majority: {counts}` | Case 3 dominant username; `medium` confidence |
+| `No profile link found — tied repo ownership: {counts}. Picked {username}.` | Case 3 tie; `low` confidence |
+| `No git links found` | Case 4; `confidence: 'none'` |
+
+---
+
+## The error field
+
+The `error` field on `ResolverResult` is only present when a fatal, unrecoverable exception occurred. It is absent (`undefined`) on successful runs — even runs that produced zero links.
+
+Conditions that set `error`:
+
+- **Network failure** — the portfolio URL timed out or returned a non-recoverable HTTP error
+- **File system error** — the resume file path does not exist or cannot be read
+- **Unexpected exception** — any other unhandled error thrown inside the scraper or parser
+
+When `error` is set, `ownerProfile` is `null`, `confidence` is `'none'`, and all link arrays (`ownedRepos`, `allLinks`, etc.) are empty. The `warnings` array may still contain partial diagnostic output from before the error occurred.
+
+<Note>
+  Partial extraction failures — such as one PDF parsing pass failing while the other succeeds — are reported in `warnings`, not `error`. An `error` value means the entire source could not be processed.
+</Note>
+
+---
+
+## JSON examples
+
+### ResolverResult example
+
+<Expandable title="Full ResolverResult JSON">
 
 ```json
 {
@@ -69,221 +228,208 @@ Every call to `resolve()` returns a `ResolverResult` — a fully typed object th
   "confidence": "high",
   "ownedRepos": [
     {
-      "url": "https://github.com/janedoe/myapp",
+      "url": "https://github.com/janedoe/api-server",
       "provider": "github",
       "type": "repo",
       "username": "janedoe",
-      "repo": "myapp"
+      "repo": "api-server"
+    },
+    {
+      "url": "https://github.com/janedoe/portfolio-site",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "portfolio-site"
     }
   ],
   "contributions": [
     {
-      "url": "https://github.com/someorg/oss-lib/pull/42",
+      "url": "https://github.com/torvalds/linux/pull/99",
       "provider": "github",
       "type": "pull_request",
-      "username": "someorg",
-      "repo": "oss-lib",
-      "number": "42"
+      "username": "torvalds",
+      "repo": "linux",
+      "number": "99"
     }
   ],
   "externalRepos": [
     {
-      "url": "https://github.com/vercel/next.js",
+      "url": "https://github.com/expressjs/express",
       "provider": "github",
       "type": "repo",
-      "username": "vercel",
-      "repo": "next.js"
+      "username": "expressjs",
+      "repo": "express"
     }
   ],
-  "allLinks": ["... all ExtractedGitLink objects ..."],
+  "allLinks": [
+    {
+      "url": "https://github.com/janedoe",
+      "provider": "github",
+      "type": "profile",
+      "username": "janedoe"
+    },
+    {
+      "url": "https://github.com/janedoe/api-server",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "api-server"
+    },
+    {
+      "url": "https://github.com/janedoe/portfolio-site",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "portfolio-site"
+    },
+    {
+      "url": "https://github.com/torvalds/linux/pull/99",
+      "provider": "github",
+      "type": "pull_request",
+      "username": "torvalds",
+      "repo": "linux",
+      "number": "99"
+    },
+    {
+      "url": "https://github.com/expressjs/express",
+      "provider": "github",
+      "type": "repo",
+      "username": "expressjs",
+      "repo": "express"
+    }
+  ],
   "warnings": [
-    "Used fetch provider (SPA rendering layer like Puppeteer/Browserless is missing)",
-    "Owner determined by repo cross-reference: janedoe(3 repos), acmecorp(1 repos)"
+    "Used puppeteer provider for page content",
+    "Owner strictly determined by profile URL input: janedoe"
   ]
 }
 ```
 
----
-
-## ExtractedGitLink
-
-`ExtractedGitLink` is the atomic unit used throughout `ResolverResult`. It appears in `ownerProfile`, `ownedRepos`, `contributions`, `externalRepos`, and `allLinks`.
-
-### Fields
-
-<ResponseField name="url" type="string" required>
-  The URL of the link as found (or normalized). For repos, this is the normalized form `https://<host>/<owner>/<repo>`. For pull requests and issues, the raw URL is preserved so that the PR or issue number is not lost.
-</ResponseField>
-
-<ResponseField name="provider" type="GitProvider" required>
-  The git hosting provider. One of `"github"`, `"gitlab"`, or `"bitbucket"`.
-</ResponseField>
-
-<ResponseField name="type" type="GitLinkType" required>
-  The kind of link this object represents. See the table below.
-</ResponseField>
-
-<ResponseField name="username" type="string" required>
-  The username or organization name extracted from the URL path. Always the first non-reserved path segment on the provider host.
-</ResponseField>
-
-<ResponseField name="repo" type="string">
-  The repository name. Present only when `type` is `"repo"`, `"pull_request"`, or `"issue"`.
-</ResponseField>
-
-<ResponseField name="number" type="string">
-  The pull request or issue number as a string. Present only when `type` is `"pull_request"` or `"issue"`.
-</ResponseField>
-
-### GitLinkType Values
-
-| Value | Description |
-|---|---|
-| `profile` | A user or organization profile page (e.g. `github.com/janedoe`) |
-| `repo` | A repository page (e.g. `github.com/janedoe/myapp`) |
-| `gist` | A GitHub Gist link (`gist.github.com/...`) |
-| `pull_request` | A pull request URL containing a numeric PR number |
-| `issue` | An issue URL containing a numeric issue number |
-| `other` | A recognized git provider URL that doesn't match any specific type above |
-
----
-
-## AggregatedResult
-
-`AggregatedResult` is produced when multiple input sources are resolved for the same candidate and then merged. The CLI uses this shape when processing a batch of inputs. It extends `ResolverResult`'s data model with provenance fields.
-
-### Additional Fields
-
-<ResponseField name="candidateUsername" type="string | null" required>
-  The resolved git username for the candidate, lowercased, or `null` if no owner could be determined across any source. This is the merge key — multiple `ResolverResult` objects with the same `candidateUsername` (case-insensitive) are combined into a single `AggregatedResult`.
-</ResponseField>
-
-<ResponseField name="sources" type="string[]" required>
-  All input source strings that contributed to this aggregated result (e.g. `["https://janedoe.dev", "./resumes/janedoe.pdf"]`).
-</ResponseField>
-
-<ResponseField name="sourceTypes" type="InputType[]" required>
-  The `sourceType` value from each contributing `ResolverResult`, in the same order as `sources`.
-</ResponseField>
-
-The remaining fields — `ownerProfile`, `confidence`, `ownedRepos`, `contributions`, `externalRepos`, `allLinks`, and `warnings` — work identically to `ResolverResult`, but represent the merged and deduplicated data across all contributing sources.
-
-### Merging Logic
-
-<Steps>
-  <Step title="Group by resolved username">
-    After all sources are individually resolved, results are grouped by `ownerProfile.username` (case-insensitive). Results where `ownerProfile` is `null` are placed into a separate unresolved bucket with `candidateUsername: null`.
-  </Step>
-  <Step title="Select the highest-confidence profile">
-    Within a group, the `ownerProfile` from the highest-confidence source is used for the aggregated result. If two sources share the same confidence tier, the first one processed is preferred.
-  </Step>
-  <Step title="Deduplicate links by URL">
-    Links from all sources in the group are merged and deduplicated by their `url` field (case-insensitive comparison). The same repo appearing in both a portfolio and a resume PDF counts once in `ownedRepos`.
-  </Step>
-  <Step title="Merge warnings">
-    Warning arrays from all contributing sources are concatenated in source order. Each warning is prefixed with its source to make it traceable.
-  </Step>
-</Steps>
-
-<Warning>
-  When all sources for a candidate resolve to `confidence: "none"` (e.g. only LinkedIn or unknown inputs were provided), the group will have `candidateUsername: null` and be placed in the unresolved bucket. Unresolved results still contain `allLinks` and `warnings` so you can diagnose why resolution failed.
-</Warning>
-
----
-
-## Confidence Levels
-
-| Level | Meaning |
-|---|---|
-| `high` | Owner determined with certainty — direct profile or repo URL input, or one profile clearly matched by repo majority |
-| `medium` | Likely correct but inferred — owner derived from repo cross-referencing without an explicit profile link, or a single profile inferred from repo authorship |
-| `low` | Best guess — multiple candidates with tied evidence, or profiles found but no repos to cross-reference |
-| `none` | No git links found, or input type cannot be resolved (LinkedIn, unknown) |
-
----
-
-## The warnings Array
-
-The `warnings` array is populated throughout processing and is the primary tool for understanding how a result was produced. Common entries include:
-
-<Expandable title="Provider used for page fetch">
-  Every portfolio scrape records which browser provider fetched the page content:
-
-  - `"Used fetch provider (SPA rendering layer like Puppeteer/Browserless is missing)"` — the page was fetched with the built-in HTTP client; JavaScript-rendered content may be missing
-  - `"Used puppeteer provider for page content"` — a headless browser was used; SPA content will be present
 </Expandable>
 
-<Expandable title="Multiple profiles found">
-  When the disambiguation algorithm finds more than one unique profile username on the page:
+### AggregatedResult example
 
-  `"Multiple profile links found: janedoe, acmecorp, somecolleague"`
-</Expandable>
-
-<Expandable title="Disambiguation method used">
-  After the algorithm selects an owner, a message describes the method:
-
-  - `"Owner strictly determined by profile URL input: janedoe"` — known-owner bypass was used
-  - `"Owner determined by repo cross-reference: janedoe(4 repos), acmecorp(1 repos)"` — Case 2 with clear winner
-  - `"⚠ Tied repo ownership between profiles: ..."` — Case 2 with a tie
-  - `"No profile link found — all repos belong to same user, inferred as owner"` — Case 3 single username
-  - `"No profile link found — inferred from repo majority: ..."` — Case 3 with majority
-  - `"No profile link found — tied repo ownership: ..."` — Case 3 with a tie
-  - `"None of the profile links match any repo owner — picking first profile"` — Case 2 with no repo matches
-  - `"Multiple profiles found but no repos to cross-reference — picking first"` — Case 2 with no repos
-</Expandable>
-
-<Expandable title="No git links found">
-  When processing completes but no git provider links were collected:
-
-  `"No git links found"`
-</Expandable>
-
-<Expandable title="Resume-specific warnings">
-  During PDF parsing, each extraction method reports its outcome:
-
-  - `"Found N git URL(s) in text content"` — text layer extraction succeeded
-  - `"Text extraction failed: <message>"` — `unpdf` text extraction threw
-  - `"Annotation extraction failed: <message>"` — PDF annotation extraction threw
-</Expandable>
-
----
-
-## The error Field (ResolverResult only)
-
-The `error` field exists on `ResolverResult` only — `AggregatedResult` does not carry an `error` field. It is set when an unhandled exception occurs during scraping or parsing — for example, a network timeout fetching a portfolio, a corrupted PDF file, or an unexpected DOM structure. GitResolve catches all errors internally and never re-throws them, so a single failing source does not abort a batch.
-
-When `error` is present:
-- `ownerProfile` will be `null`
-- `confidence` will be `"none"`
-- `ownedRepos`, `contributions`, `externalRepos`, and `allLinks` will be empty arrays
-- `warnings` may contain partial diagnostic output from before the error occurred
+<Expandable title="Full AggregatedResult JSON">
 
 ```json
 {
-  "source": "https://broken-portfolio.example.com",
-  "sourceType": "portfolio",
-  "ownerProfile": null,
-  "confidence": "none",
-  "ownedRepos": [],
-  "contributions": [],
-  "externalRepos": [],
-  "allLinks": [],
-  "warnings": [],
-  "error": "fetch failed: ECONNREFUSED"
+  "candidateUsername": "janedoe",
+  "sources": [
+    "https://janedoe.dev",
+    "./resumes/jane_doe.pdf"
+  ],
+  "sourceTypes": [
+    "portfolio",
+    "resume_file"
+  ],
+  "ownerProfile": {
+    "url": "https://github.com/janedoe",
+    "provider": "github",
+    "type": "profile",
+    "username": "janedoe"
+  },
+  "confidence": "high",
+  "ownedRepos": [
+    {
+      "url": "https://github.com/janedoe/api-server",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "api-server"
+    },
+    {
+      "url": "https://github.com/janedoe/portfolio-site",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "portfolio-site"
+    },
+    {
+      "url": "https://github.com/janedoe/data-pipeline",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "data-pipeline"
+    }
+  ],
+  "contributions": [
+    {
+      "url": "https://github.com/torvalds/linux/pull/99",
+      "provider": "github",
+      "type": "pull_request",
+      "username": "torvalds",
+      "repo": "linux",
+      "number": "99"
+    }
+  ],
+  "externalRepos": [
+    {
+      "url": "https://github.com/expressjs/express",
+      "provider": "github",
+      "type": "repo",
+      "username": "expressjs",
+      "repo": "express"
+    }
+  ],
+  "allLinks": [
+    {
+      "url": "https://github.com/janedoe",
+      "provider": "github",
+      "type": "profile",
+      "username": "janedoe"
+    },
+    {
+      "url": "https://github.com/janedoe/api-server",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "api-server"
+    },
+    {
+      "url": "https://github.com/janedoe/portfolio-site",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "portfolio-site"
+    },
+    {
+      "url": "https://github.com/janedoe/data-pipeline",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "data-pipeline"
+    },
+    {
+      "url": "https://github.com/torvalds/linux/pull/99",
+      "provider": "github",
+      "type": "pull_request",
+      "username": "torvalds",
+      "repo": "linux",
+      "number": "99"
+    },
+    {
+      "url": "https://github.com/expressjs/express",
+      "provider": "github",
+      "type": "repo",
+      "username": "expressjs",
+      "repo": "express"
+    }
+  ],
+  "warnings": [
+    "Used puppeteer provider for page content",
+    "Owner strictly determined by profile URL input: janedoe",
+    "Found 2 git URL(s) in text content"
+  ]
 }
 ```
 
----
+</Expandable>
 
-## TypeScript Imports
-
-```typescript
-import type {
-  ResolverResult,
-  AggregatedResult,
-  ExtractedGitLink,
-  InputType,
-  GitProvider,
-  GitLinkType,
-} from '@clyrisai/gitresolve';
-```
+<CardGroup cols={2}>
+  <Card title="Input Classification" icon="filter" href="/concepts/input-classification">
+    How every input is categorized before processing begins
+  </Card>
+  <Card title="Disambiguation" icon="code-branch" href="/concepts/disambiguation">
+    How GitResolve resolves ambiguous link sets to a single owner
+  </Card>
+</CardGroup>

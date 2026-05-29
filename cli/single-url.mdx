@@ -1,110 +1,191 @@
 ---
-title: "Process a Single URL or Resume with GitResolve"
+title: "Process a Single URL or File with GitResolve"
 sidebarTitle: "Single URL"
-description: "Pass a portfolio URL, GitHub profile, repository link, or resume PDF directly to gitresolve to extract a structured candidate git profile."
+description: "Pass any portfolio, GitHub profile, GitLab URL, repo link, or resume PDF as a positional argument and resolve it to a structured candidate profile."
 ---
 
-Pass any candidate-related URL or file path as the first argument to `gitresolve` and it will classify the input, fetch or parse the content, and return a structured profile containing the candidate's git identity, owned repositories, contributions, and external references. No configuration file is required for single-URL mode.
+The simplest way to use GitResolve is to pass a single URL or local file path as a positional argument. GitResolve automatically classifies the input, selects the right processing strategy, and prints a resolved candidate profile to your terminal.
 
-## Supported Input Types
-
-Every example below resolves into the same structured JSON output — the classification pipeline determines how the input is fetched and parsed.
+## Basic Usage
 
 ```bash
-# Portfolio website
-gitresolve https://janedoe.dev
-
-# GitHub profile
-gitresolve https://github.com/janedoe
-
-# GitLab profile
-gitresolve https://gitlab.com/janedoe
-
-# Repository URL
-gitresolve https://github.com/janedoe/my-project
-
-# Remote resume PDF
-gitresolve https://example.com/resume.pdf
-
-# Local resume PDF
-gitresolve ./resumes/janedoe.pdf
+gitresolve <url-or-path>
 ```
 
-## The `--type` Flag
-
-GitResolve automatically classifies most inputs, but some URLs are ambiguous — for example, a resume hosted at a URL that does not end in `.pdf`. Use `--type` to override the classifier.
-
-```bash
-# Force a URL to be treated as a resume
-gitresolve https://drive.example.com/file/abc123 --type resume
-
-# Explicitly treat a URL as a portfolio (rarely needed)
-gitresolve https://example.com/profile --type portfolio
-```
-
-`--type` accepts two values:
-
-| Value | When to use |
-|-------|-------------|
-| `resume` | The URL points to a resume PDF but the path doesn't end in `.pdf` |
-| `portfolio` | You want to force portfolio scraping on a URL the classifier might otherwise treat differently |
+The `<url-or-path>` argument accepts any of the input types documented below. You do not need to specify a mode flag — GitResolve infers what the input is and handles it accordingly.
 
 ## URL Normalization
 
-You do not need to include the `https://` scheme. GitResolve prepends it automatically for any input that does not already start with `http://`, `https://`, `./`, `/`, or `~/`, and that does not look like a local file path.
+GitResolve normalizes bare domains before processing so you do not need to type the full `https://` prefix every time.
+
+The following inputs are treated as-is and are **not** prefixed:
+- Inputs that already start with `http://` or `https://`
+- Local file paths starting with `./`, `/`, or `~/`
+- File names ending in `.pdf`, `.doc`, `.docx`, or `.rtf`
+
+Everything else has `https://` prepended automatically:
 
 ```bash
-# These two commands are equivalent
+# These two commands resolve the same page
 gitresolve github.com/janedoe
 gitresolve https://github.com/janedoe
 ```
 
-Local file paths (starting with `./`, `/`, or `~/`) and paths ending in `.pdf`, `.doc`, `.docx`, or `.rtf` are passed through as-is without scheme prepending.
+## Supported Input Types
+
+| Input Type | Example | Processing Strategy |
+|---|---|---|
+| Portfolio website | `https://janedoe.dev` | Scrapes page for Git links |
+| GitHub profile | `https://github.com/janedoe` | Scrapes profile, discovers repos |
+| GitLab profile | `https://gitlab.com/janedoe` | Scrapes profile, handles `/users/` routes |
+| Bitbucket profile | `https://bitbucket.org/janedoe` | Scrapes profile page |
+| Repository URL | `https://github.com/janedoe/my-project` | Scrapes repo page, resolves owner |
+| Remote resume PDF | `https://example.com/resume.pdf` | Downloads PDF, extracts text and links |
+| Local resume PDF | `./resumes/janedoe.pdf` | Reads PDF from disk, extracts text and links |
+
+### Portfolio Website
+
+```bash
+gitresolve https://janedoe.dev
+```
+
+The page is fetched and scraped for any GitHub, GitLab, or Bitbucket URLs. All discovered links are classified, deduped, and organized into owned repos, contributions, and external references.
+
+### GitHub Profile
+
+```bash
+gitresolve https://github.com/janedoe
+```
+
+GitResolve detects the `github.com` hostname, recognizes the path as a single-segment user profile, and scrapes the profile page to extract all linked repositories.
+
+### GitLab Profile
+
+```bash
+gitresolve https://gitlab.com/janedoe
+```
+
+Both the standard route (`/janedoe`) and the long-form `/users/janedoe` route are handled correctly.
+
+### Bitbucket Profile
+
+```bash
+gitresolve https://bitbucket.org/janedoe
+```
+
+### Repository URL
+
+```bash
+gitresolve https://github.com/janedoe/my-project
+```
+
+The owner username is extracted from the repo path. GitResolve scrapes the repository page and resolves the owning profile.
+
+### Remote Resume PDF
+
+```bash
+gitresolve https://example.com/janedoe-resume.pdf
+```
+
+GitResolve fetches the PDF, saves it to a temporary file, and extracts both the raw text content and any embedded hyperlink annotations. All Git URLs found are classified and returned.
+
+### Local Resume PDF
+
+```bash
+gitresolve ./resumes/janedoe.pdf
+```
+
+Local file paths are read directly from disk. The `.pdf` extension prevents URL normalization from prepending `https://`.
+
+## The `--type` Flag
+
+When GitResolve cannot determine the input type from the URL alone — for example, a resume hosted behind a redirect or a URL without a `.pdf` extension — use `--type` to provide a hint.
+
+```bash
+# Force a URL to be treated as a resume PDF
+gitresolve https://storage.example.com/candidate-cv --type resume
+
+# Force a URL to be treated as a portfolio page
+gitresolve https://example.com/about --type portfolio
+```
+
+Accepted values are `portfolio` and `resume`. The `--type` flag overrides the classifier but only applies to the single-URL mode — it is ignored during batch processing.
 
 ## Classification Pipeline
 
-When you pass a URL, GitResolve runs it through the following pipeline:
+When you pass a URL, GitResolve runs through the following steps before any network request is made:
 
-1. **Normalize** — prepend `https://` if no scheme is present.
-2. **Classify** — determine if the input is a `portfolio`, `git_profile`, `repo_url`, `resume_file`, or `resume_url`.
-3. **Fetch or parse** — scrape the page with the configured browser provider (for portfolios and git profiles), fetch and write a temp file then parse (for remote resume URLs), or parse directly (for local PDF paths).
-4. **Extract links** — pull all GitHub, GitLab, and Bitbucket URLs from the page content or PDF text and hyperlink annotations.
-5. **Disambiguate** — separate the candidate's own profile from repositories they've contributed to or merely referenced.
-6. **Return** — emit a `ResolverResult` object with `ownerProfile`, `confidence`, `ownedRepos`, `contributions`, `externalRepos`, `allLinks`, and `warnings`.
+<Steps>
+  <Step title="Normalize input">
+    The raw input string is checked for a protocol prefix, file extension, and local path markers. A `https://` prefix is prepended if needed.
+  </Step>
+  <Step title="Classify input type">
+    The classifier checks the hostname against known Git providers (`github.com`, `gitlab.com`, `bitbucket.org`), runs a repo-URL parser to distinguish profile URLs from repo URLs, and flags local file paths with document extensions as resume files. Any other valid URL is classified as a `portfolio`.
+  </Step>
+  <Step title="Select processing strategy">
+    Resume files and remote resume PDFs are routed to the PDF parser. Portfolio pages, Git profiles, and repo URLs are routed to the portfolio scraper with the appropriate browser provider.
+  </Step>
+  <Step title="Scrape or parse">
+    For portfolio and Git URLs, the page is fetched (via `fetch`, Puppeteer, or Browserless) and all Git URLs are extracted from the HTML. For PDFs, text content and hyperlink annotations are extracted.
+  </Step>
+  <Step title="Disambiguate owner">
+    All discovered links are analysed to determine which username appears most frequently as an owner. That username becomes the `ownerProfile`, and links are sorted into `ownedRepos`, `contributions`, and `externalRepos`.
+  </Step>
+  <Step title="Return result">
+    A structured `ResolverResult` object is printed to the terminal (or emitted as JSON if `--json` is set).
+  </Step>
+</Steps>
 
 ## JSON Output
 
-Add `--json` to receive the raw result object on stdout instead of the default ANSI-colored terminal display.
+Add `--json` to suppress the ANSI terminal UI and print a raw JSON array to stdout instead. The single-URL mode still returns an array — it will contain one `AggregatedResult` object.
 
 ```bash
 gitresolve https://github.com/janedoe --json
 ```
 
 ```json
-{
-  "source": "https://github.com/janedoe",
-  "sourceType": "git_profile",
-  "ownerProfile": {
-    "url": "https://github.com/janedoe",
-    "provider": "github",
-    "type": "profile",
-    "username": "janedoe"
-  },
-  "confidence": "high",
-  "ownedRepos": [],
-  "contributions": [],
-  "externalRepos": [],
-  "allLinks": [],
-  "warnings": []
-}
+[
+  {
+    "candidateUsername": "janedoe",
+    "sources": ["https://github.com/janedoe"],
+    "sourceTypes": ["git_profile"],
+    "ownerProfile": {
+      "url": "https://github.com/janedoe",
+      "provider": "github",
+      "type": "profile",
+      "username": "janedoe"
+    },
+    "confidence": "high",
+    "ownedRepos": [
+      {
+        "url": "https://github.com/janedoe/my-project",
+        "provider": "github",
+        "type": "repo",
+        "username": "janedoe",
+        "repo": "my-project"
+      }
+    ],
+    "contributions": [],
+    "externalRepos": [],
+    "allLinks": [],
+    "warnings": []
+  }
+]
 ```
 
-You can pipe this directly to `jq` for further processing:
+<Tip>
+  Pipe `--json` output directly to `jq` for quick field extraction:
 
-```bash
-gitresolve https://janedoe.dev --json | jq '.ownerProfile'
-```
+  ```bash
+  gitresolve https://github.com/janedoe --json | jq '.[0].ownerProfile'
+  ```
+</Tip>
+
+## LinkedIn URLs
+
+LinkedIn URLs are recognized by the classifier and returned with an `InputType` of `linkedin`. However, GitResolve **does not scrape LinkedIn pages** — the result will have `confidence: "none"` and a warning explaining that LinkedIn cannot be resolved. Use a portfolio URL or direct Git profile link instead.
 
 <Note>
-  LinkedIn URLs (e.g. `https://linkedin.com/in/janedoe`) are recognized by the classifier and returned with a `linkedin` type, but GitResolve does not scrape LinkedIn pages. The result will contain the detected URL but no resolved git profile or repositories.
+  LinkedIn classification exists to give you a clear warning rather than a silent failure. If a candidate's only provided link is LinkedIn, you will see the URL echoed back with an explanatory message in `warnings`.
 </Note>

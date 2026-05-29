@@ -1,123 +1,183 @@
 ---
-title: "Owner Disambiguation: How GitResolve Identifies Candidates"
+title: "Disambiguation: Identifying the Candidate's Git Identity"
 sidebarTitle: "Disambiguation"
-description: "GitResolve uses a cross-referencing algorithm to determine which git profile belongs to the candidate when multiple profiles or repos are found on a page."
+description: "Understand how GitResolve's four-case algorithm resolves ambiguous link sets into a single owner profile with a confidence score."
 ---
 
-A candidate's portfolio page rarely contains only their own GitHub links. Open-source project pages link to contributor profiles. Personal sites credit collaborators, reference libraries maintained by others, or link to an employer's organization. When GitResolve scrapes a portfolio or parses a resume, it collects every git provider link on the page — and then needs to decide which of those profiles actually belongs to the candidate. This is the disambiguation step: a cross-referencing algorithm that ranks profile candidates against the repos found on the same page to determine ownership with a calibrated confidence level.
+A developer's portfolio page typically contains far more git links than just their own profile and repositories. Project pages link to upstream libraries, open-source work references maintainers, collaboration sections mention teammates, and blog posts embed links to third-party repos. When GitResolve scrapes a portfolio or parses a resume PDF, it collects all of these links together — and then must figure out which one of them is actually the candidate. The `resolveOwnerAndCategorize` function solves this problem by cross-referencing profile links against repo links and applying a four-case decision algorithm that produces both an `ownerProfile` and a `confidence` level explaining how certain the resolution is.
 
-## The Four Disambiguation Cases
+## The knownOwnerProfile bypass
 
-GitResolve evaluates the set of extracted `ExtractedGitLink` objects and applies one of four resolution strategies based on what was found.
-
-### Case 1 — Single profile link found
-
-If only one unique GitHub/GitLab/Bitbucket profile username appears in the collected links, that profile is declared the owner without any further analysis. This is the simplest and most common case for straightforward personal portfolio pages.
-
-- **Confidence:** `high`
-- **No cross-referencing needed** — unambiguous by definition
-
----
-
-### Case 2 — Multiple distinct profiles found
-
-Portfolio pages for developers who have collaborated on open-source projects frequently link to team members' GitHub profiles, employer organizations, or library authors. When GitResolve finds more than one unique profile username, it cross-references each profile against the repo links found on the same page.
-
-**Cross-referencing logic:**
-
-For each unique profile username, GitResolve counts how many repo links on the page have a matching `username` field (comparison is case-insensitive). The profile with the highest repo-match count is selected as the owner.
-
-| Outcome | Confidence | Notes |
-|---|---|---|
-| One profile has more matching repos than all others | `high` | Clear majority — repo authorship confirms identity |
-| Two or more profiles are tied in repo-match count | `medium` | First tied profile is selected; ambiguity flagged in `warnings` |
-| No profile matches any repo on the page | `low` | First profile in document order is selected; flagged in `warnings` |
-| Multiple profiles, zero repos anywhere | `low` | No cross-reference possible; first profile selected |
-
----
-
-### Case 3 — No profile links, only repos
-
-Some resumes and project pages link to repositories directly without ever linking to a profile page. When no profile links exist but repo links do, GitResolve infers the owner from repo authorship alone.
-
-All repo links are grouped by their `username` field. The username that appears on the most repos is selected, and a synthetic profile `ExtractedGitLink` is constructed from it (e.g. `https://github.com/janedoe` if the repos are on GitHub).
-
-| Outcome | Confidence | Notes |
-|---|---|---|
-| Single username owns all repos | `medium` | All repos belong to same user — inferred as owner |
-| One username owns more repos than any other | `medium` | Majority ownership — inferred as owner; breakdown in `warnings` |
-| Two or more usernames are tied | `low` | First username in sort order selected; flagged in `warnings` |
-
-<Info>
-  Inferred profiles from Case 3 are synthetic — GitResolve constructs the profile URL from the repo's host and owner field. The profile URL will be valid and well-formed, but it was not directly observed as a profile link on the page.
-</Info>
-
----
-
-### Case 4 — Nothing found
-
-If the collected link set is empty, or contains only gists, issues, and other non-profile, non-repo links, disambiguation cannot run.
-
-- **Confidence:** `none`
-- `ownerProfile` is `null`
-- `ownedRepos`, `contributions`, and `externalRepos` are all empty arrays
-- A `"No git links found"` warning is added
-
----
-
-## Confidence Level Reference
-
-| Level | Meaning |
-|---|---|
-| `high` | Owner determined with certainty — direct profile URL input, or one profile with a clear repo majority |
-| `medium` | Likely correct but inferred — cross-referenced from repos, or repos attribute to a single username without an explicit profile link |
-| `low` | Best guess — multiple candidates with no clear winner, or profiles found but no repos to cross-reference against |
-| `none` | No git links found at all; `ownerProfile` is `null` |
-
-## Repo Categorization After Owner Is Determined
-
-Once an owner username is resolved, every repo and contribution link in `allLinks` is sorted into one of three buckets:
-
-<CardGroup cols={3}>
-  <Card title="ownedRepos" icon="box">
-    Repos where `link.username` matches the resolved owner username (case-insensitive). These are the candidate's own projects.
-  </Card>
-  <Card title="contributions" icon="code-pull-request">
-    Links classified as `pull_request` or `issue` type. These represent explicit open-source contributions regardless of which repo they belong to.
-  </Card>
-  <Card title="externalRepos" icon="arrow-up-right-from-square">
-    Repos where `link.username` does not match the owner. These are libraries used, employers' repos, collaborators' projects, or other references.
-  </Card>
-</CardGroup>
-
-Repo deduplication is applied before categorization: if the same normalized repo URL appears more than once in `allLinks`, only the first occurrence is counted.
-
-## Known-Owner Bypass (Direct Profile and Repo URLs)
-
-When the input is a `git_profile` or `repo_url` (i.e. a direct link to a GitHub profile or repository), GitResolve already knows exactly who the candidate is from the URL path. In this case, disambiguation is skipped entirely. The owner is passed as `knownOwnerProfile` directly into `resolveOwnerAndCategorize`, and confidence is set to `high` unconditionally.
-
-<Note>
-  The `knownOwnerProfile` bypass also applies when you pass an explicit owner hint to `resolve()`. This is useful when you already know the candidate's username and want to force ownership attribution without running the disambiguation algorithm.
-</Note>
-
-## Case-Insensitive Matching
-
-All username comparisons throughout the disambiguation algorithm — profile deduplication, repo-match scoring, repo categorization — are performed case-insensitively. `JaneDoe`, `janedoe`, and `JANEDOE` are treated as the same username. This prevents false splits caused by inconsistent casing across different pages or providers.
-
-## Code Example
+When the input is already a `git_profile` or `repo_url`, the owner is known before disambiguation runs. The resolver extracts the username directly from the URL, constructs a `knownOwnerProfile`, and passes it to `resolveOwnerAndCategorize`. This skips the four-case algorithm entirely.
 
 ```typescript
-import { resolveOwnerAndCategorize } from '@clyrisai/gitresolve';
-
-const resolution = resolveOwnerAndCategorize(links, 'portfolio');
-// resolution.ownerProfile   — the candidate's profile (ExtractedGitLink | null)
-// resolution.confidence     — 'high' | 'medium' | 'low' | 'none'
-// resolution.ownedRepos     — repos belonging to the candidate
-// resolution.contributions  — PRs and issues linked on the page
-// resolution.externalRepos  — repos owned by others
-// resolution.warnings       — diagnostic messages explaining how the decision was made
+// When you pass a known owner, the algorithm is bypassed
+resolveOwnerAndCategorize(links, "portfolio", knownOwnerProfile);
+// → confidence: 'high', ownerProfile set directly from knownOwnerProfile
+// → warning added: 'Owner strictly determined by profile URL input: <username>'
 ```
 
 <Tip>
-  The `warnings` array is your primary debugging tool. When confidence is `medium` or `low`, warnings will describe exactly which profiles and repos were found, their match scores, and which profile was selected and why. Check `warnings` first whenever results look unexpected.
+  If you already know the candidate's GitHub username — for example, they applied through a form that collected it — pass it as `knownOwnerProfile` to guarantee `confidence: 'high'` regardless of what links the portfolio contains.
 </Tip>
+
+## The four disambiguation cases
+
+`resolveOwnerAndCategorize` inspects the full set of `ExtractedGitLink` objects found in a source and applies one of four resolution strategies depending on what is present.
+
+<Steps>
+  <Step title="Case 1 — Single unique profile username: high confidence">
+    If exactly one distinct git profile username appears across all profile-type links (after deduplication by username, case-insensitive), that user is unambiguously the owner.
+
+    **Result:** `ownerProfile` set to that profile link, `confidence: 'high'`.
+
+    This is the most common case for a personal portfolio that links only to the candidate's own GitHub profile in the header or footer.
+
+    ```typescript
+    // Portfolio HTML contains only one profile link: github.com/janedoe
+    // → ownerProfile.username = 'janedoe', confidence = 'high'
+    ```
+  </Step>
+  <Step title="Case 2 — Multiple distinct profile usernames: cross-reference with repos">
+    When two or more distinct profile usernames are found, GitResolve cannot immediately determine which is the candidate. Instead it counts how many repo links belong to each username and uses that score to pick the owner.
+
+    A warning is always added: `'Multiple profile links found: alice, bob, charlie'`.
+
+    The outcome depends on the repo scores:
+
+    | Scenario | Confidence | Behaviour |
+    |---|---|---|
+    | One profile has strictly more matching repos than all others | `high` | That profile is the owner. A warning lists the repo scores per username. |
+    | Two or more profiles are tied for the highest repo count (and count > 0) | `medium` | First tied profile is chosen. Warning flags the tie. |
+    | No repo links match any profile username | `low` | First profile in the list is chosen. Warning notes the mismatch. |
+    | Multiple profiles found but zero repo links exist | `low` | First profile is chosen. Warning notes no repos available for cross-reference. |
+
+    ```typescript
+    // Profile links: github.com/janedoe, github.com/alice-mentor
+    // Repo links: 4 repos owned by janedoe, 1 owned by alice-mentor
+    // → ownerProfile.username = 'janedoe', confidence = 'high'
+    // → warning: 'Owner determined by repo cross-reference: janedoe(4 repos), alice-mentor(1 repos)'
+    ```
+  </Step>
+  <Step title="Case 3 — No profile links, only repo links: infer from username frequency">
+    Some resumes and older portfolios list repository links but no direct profile URLs. In this case, GitResolve groups all repo links by their `username` field and picks the username that appears most often.
+
+    A synthetic profile link is constructed at `https://{host}/{username}` (e.g. `https://github.com/janedoe`) and set as `ownerProfile`.
+
+    | Scenario | Confidence |
+    |---|---|
+    | All repos belong to a single username | `medium` |
+    | One username owns more repos than all others combined | `medium` |
+    | Two or more usernames are tied for the most repos | `low` |
+
+    ```typescript
+    // No profile links found
+    // Repo links: janedoe/api(×3), janedoe/frontend(×1), third-party/lib(×1)
+    // → synthetic ownerProfile.url = 'https://github.com/janedoe'
+    // → confidence = 'medium'
+    // → warning: 'No profile link found — inferred from repo majority: janedoe(4), third-party(1)'
+    ```
+  </Step>
+  <Step title="Case 4 — No links at all: confidence none">
+    If the input yielded zero `ExtractedGitLink` objects — the page could not be fetched, the PDF contained no recognisable git URLs, or all links were filtered as reserved paths — disambiguation cannot produce any result.
+
+    **Result:** `ownerProfile: null`, `confidence: 'none'`, warning: `'No git links found'`.
+  </Step>
+</Steps>
+
+## Confidence level reference
+
+| Level | Meaning | Typical source |
+|---|---|---|
+| `high` | Owner identity is certain | Direct `git_profile`/`repo_url` input, or one clear profile found, or one profile dominates repos |
+| `medium` | Owner identity is a strong inference but not guaranteed | Owner inferred from repo majority; no explicit profile link present |
+| `low` | Owner identity is a best guess | Multiple tied profiles or repos; no supporting evidence for a clear winner |
+| `none` | Owner identity could not be determined | No git links found at all, or LinkedIn-only source |
+
+## Repo categorization
+
+Once `ownerUsername` is established, every link in the input set is assigned to one of three buckets. Deduplication by URL (case-insensitive) is applied across all three buckets before the result is returned.
+
+| Bucket | Population rule |
+|---|---|
+| `ownedRepos` | `link.type === 'repo'` **and** `link.username` matches `ownerUsername` (case-insensitive) |
+| `contributions` | `link.type === 'pull_request'` **or** `link.type === 'issue'` |
+| `externalRepos` | `link.type === 'repo'` **and** `link.username` does **not** match `ownerUsername` |
+
+Profile links and gist links are not placed in any bucket — they appear only in `allLinks`.
+
+<Info>
+  Username matching is always case-insensitive. A portfolio linking to `github.com/JaneDoe` and a repo owned by `janedoe` will be correctly matched to the same person.
+</Info>
+
+## Calling resolveOwnerAndCategorize directly
+
+While the function is called internally by `scrapePortfolio` and `parseResume`, you can invoke it directly when you have a pre-built set of `ExtractedGitLink` objects.
+
+```typescript
+import { resolveOwnerAndCategorize } from "@clyrisai/gitresolve";
+import type { ExtractedGitLink } from "@clyrisai/gitresolve";
+
+const links: ExtractedGitLink[] = [
+  {
+    url: "https://github.com/janedoe",
+    provider: "github",
+    type: "profile",
+    username: "janedoe",
+  },
+  {
+    url: "https://github.com/janedoe/api-server",
+    provider: "github",
+    type: "repo",
+    username: "janedoe",
+    repo: "api-server",
+  },
+  {
+    url: "https://github.com/alice/some-library",
+    provider: "github",
+    type: "repo",
+    username: "alice",
+    repo: "some-library",
+  },
+  {
+    url: "https://github.com/torvalds/linux/pull/99",
+    provider: "github",
+    type: "pull_request",
+    username: "torvalds",
+    repo: "linux",
+    number: "99",
+  },
+];
+
+const resolution = resolveOwnerAndCategorize(links);
+
+console.log(resolution.ownerProfile?.username); // 'janedoe'
+console.log(resolution.confidence);             // 'high'
+console.log(resolution.ownedRepos.length);      // 1  (janedoe/api-server)
+console.log(resolution.externalRepos.length);   // 1  (alice/some-library)
+console.log(resolution.contributions.length);   // 1  (torvalds/linux#99)
+```
+
+### Using the knownOwnerProfile parameter
+
+```typescript
+const knownOwner: ExtractedGitLink = {
+  url: "https://github.com/janedoe",
+  provider: "github",
+  type: "profile",
+  username: "janedoe",
+};
+
+// All links categorized against janedoe; algorithm skipped
+const resolution = resolveOwnerAndCategorize(links, "portfolio", knownOwner);
+// → confidence: 'high', ownerProfile: knownOwner
+```
+
+<CardGroup cols={2}>
+  <Card title="Input Classification" icon="filter" href="/concepts/input-classification">
+    How inputs are categorized before disambiguation runs
+  </Card>
+  <Card title="Result Structure" icon="brackets-curly" href="/concepts/result-structure">
+    The full shape of ResolverResult and AggregatedResult
+  </Card>
+</CardGroup>

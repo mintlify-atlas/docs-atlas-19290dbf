@@ -1,108 +1,146 @@
 ---
-title: "Batch Process Portfolios and Resumes with GitResolve"
+title: "Batch Process Portfolios & Resumes with GitResolve"
 sidebarTitle: "Batch Processing"
-description: "Use GitResolve's batch mode to process hundreds of candidate portfolio CSVs and resume PDF directories, with automatic deduplication and aggregation."
+description: "Use --portfolios, --resumes, or --all to process an entire CSV of portfolio links and a directory of PDF resumes in a single GitResolve command."
 ---
 
-Batch mode lets you point GitResolve at a CSV of portfolio links and a directory of resume PDFs and process every candidate in one command. Results from multiple sources that resolve to the same GitHub username are automatically merged into a single aggregated profile, eliminating duplicates across your input files.
+Batch mode lets you resolve an entire hiring pipeline at once. Point GitResolve at a CSV of portfolio links and a folder of PDF resumes, and it will process every candidate, aggregate results from multiple sources, and either print a summary table or write per-candidate JSON files to disk.
 
 ## Batch Flags
 
-Three flags control which sources are included in a batch run.
+| Flag | Description |
+|---|---|
+| `--portfolios` | Process portfolio URLs from the CSV file only |
+| `--resumes` | Process PDF resumes from the resumes directory only |
+| `--all` | Process both the CSV and the resumes directory |
 
-| Flag | What it processes |
-|------|-------------------|
-| `--portfolios` | Portfolio links from the CSV file only |
-| `--resumes` | Resume PDFs from the resumes directory only |
-| `--all` | Both the CSV and the resumes directory |
+Running `gitresolve` with no URL argument and none of these flags defaults to `--all`.
 
 ```bash
-# Portfolios only
-gitresolve --portfolios
-
-# Resumes only
-gitresolve --resumes
-
-# Both (most common)
+# These three commands are equivalent
+gitresolve
 gitresolve --all
+gitresolve --portfolios --resumes
+```
+
+## Default Data Paths
+
+| Source | Default Path | Override Flag | Environment Variable |
+|---|---|---|---|
+| Portfolio CSV | `./data/portfolio_links.csv` | `--portfolio-csv <path>` | `PORTFOLIO_CSV` |
+| Resumes directory | `./data/resumes` | `--resumes-dir <path>` | `RESUMES_DIR` |
+
+### Custom Paths
+
+```bash
+# Custom CSV path
+gitresolve --portfolios --portfolio-csv ./candidates/ats-export.csv
+
+# Custom resumes directory
+gitresolve --resumes --resumes-dir ./uploads/applications
+
+# Both at once
+gitresolve --all \
+  --portfolio-csv ./candidates/ats-export.csv \
+  --resumes-dir ./uploads/applications
 ```
 
 ## Portfolio CSV Format
 
-The CSV file must contain portfolio or profile URLs, one per row. GitResolve looks for a column named `url`, `URL`, `link`, or `Link`. If none of those headers are found, it falls back to reading the first column regardless of its name.
+The CSV must contain a column that GitResolve can use as the URL source. Column names are checked in the following priority order:
+
+1. `url`
+2. `URL`
+3. `link`
+4. `Link`
+5. **First column** (fallback — used if none of the above are present)
 
 ```csv
-url
+name,url,notes
+Jane Doe,https://janedoe.dev,Strong frontend
+John Smith,https://github.com/jsmith,Backend focus
+Alice Lee,https://gitlab.com/alicelee,
+```
+
+<Tip>
+  GitResolve applies the same URL normalization used in single-URL mode. Bare domains like `janedoe.dev` in the CSV are automatically prefixed with `https://` before processing.
+</Tip>
+
+If your CSV column is named something other than the four supported names, rename the column or rely on the first-column fallback:
+
+```csv
+portfolio_url
 https://janedoe.dev
-https://github.com/johndoe
-https://portfolio.example.com/bob
+https://github.com/jsmith
 ```
 
-Any extra columns in the CSV are ignored, so you can use an existing ATS export without stripping it down first — as long as one of the recognized column names (or the first column) contains the URLs.
+## Resumes Directory Format
 
-## Resumes Directory
-
-Drop PDF files directly into the resumes directory. GitResolve reads every file with a `.pdf` extension and passes each one through the resume parser, which extracts both plain text and embedded hyperlink annotations.
+GitResolve scans the target directory and processes every file with a `.pdf` extension. Subdirectories are not traversed — all PDFs must be in the top-level folder.
 
 ```
-data/resumes/
-├── janedoe.pdf
-├── johndoe.pdf
-└── bob_smith_resume.pdf
+data/
+└── resumes/
+    ├── jane-doe.pdf
+    ├── john-smith.pdf
+    └── alice-lee.pdf
 ```
 
-## Default Paths
+Non-PDF files in the same directory are silently ignored.
 
-| Source | Default path | Override flag |
-|--------|--------------|---------------|
-| Portfolio CSV | `./data/portfolio_links.csv` | `--portfolio-csv <path>` |
-| Resumes directory | `./data/resumes` | `--resumes-dir <path>` |
-
-```bash
-# Use custom paths
-gitresolve --all \
-  --portfolio-csv ./exports/candidates.csv \
-  --resumes-dir ./uploads/pdfs
-```
-
-## Setting Up and Running Batch Mode
+## Step-by-Step Setup
 
 <Steps>
-  <Step title="Create the resumes folder and add PDFs">
+  <Step title="Create the data folders">
+    Create the default directory structure in your project root.
+
     ```bash
     mkdir -p data/resumes
+    ```
+  </Step>
+  <Step title="Add portfolio links">
+    Create `data/portfolio_links.csv` with a `url` column.
+
+    ```csv
+    name,url
+    Jane Doe,https://janedoe.dev
+    John Smith,https://github.com/jsmith
+    Alice Lee,https://gitlab.com/alicelee
+    ```
+  </Step>
+  <Step title="Add resume PDFs">
+    Copy or move candidate resume PDFs into `data/resumes/`.
+
+    ```bash
     cp ~/Downloads/*.pdf data/resumes/
     ```
   </Step>
-  <Step title="Create the portfolio CSV">
-    Create `data/portfolio_links.csv` with a `url` column containing one portfolio or profile link per row.
-
-    ```csv
-    url
-    https://janedoe.dev
-    https://github.com/johndoe
-    https://portfolio.example.com/bob
-    ```
-  </Step>
   <Step title="Run the batch command">
+    Process all inputs with a single command.
+
     ```bash
     gitresolve --all
     ```
 
-    GitResolve will process every URL in the CSV and every PDF in the resumes directory, printing a live summary to the terminal as each candidate is resolved.
-  </Step>
-  <Step title="Optionally save results to a directory">
-    ```bash
-    gitresolve --all --output-dir results/
-    ```
+    To save results to disk instead of (or in addition to) the terminal:
 
-    This writes a JSON file per candidate under `results/resolved/` and `results/unresolved/`. See [Output Options](/cli/output-options) for the full directory structure.
+    ```bash
+    gitresolve --all --output-dir ./results
+    ```
   </Step>
 </Steps>
 
 ## Candidate Aggregation
 
-When the same GitHub username appears in more than one source — for example, a portfolio link and a resume PDF both point to `github.com/janedoe` — GitResolve merges them into a single `AggregatedResult` rather than emitting two separate entries. The merged record tracks every source URL and source type that contributed to it, and deduplicates links across all of them.
+When two or more sources — for example, a portfolio link from the CSV and a PDF resume — both resolve to the same Git username, GitResolve automatically merges them into a single `AggregatedResult`. Duplicate links are deduplicated by URL, and all source references are tracked in the `sources` and `sourceTypes` arrays.
+
+```bash
+# janedoe.dev and janedoe.pdf both resolve to github.com/janedoe
+# → one merged AggregatedResult is written to results/resolved/janedoe.json
+gitresolve --all --output-dir ./results
+```
+
+### Example Aggregated Output
 
 ```json
 {
@@ -122,18 +160,43 @@ When the same GitHub username appears in more than one source — for example, a
     "username": "janedoe"
   },
   "confidence": "high",
-  "ownedRepos": [],
-  "contributions": [],
+  "ownedRepos": [
+    {
+      "url": "https://github.com/janedoe/my-project",
+      "provider": "github",
+      "type": "repo",
+      "username": "janedoe",
+      "repo": "my-project"
+    }
+  ],
+  "contributions": [
+    {
+      "url": "https://github.com/open-source-org/library/pull/42",
+      "provider": "github",
+      "type": "pull_request",
+      "username": "janedoe",
+      "repo": "library",
+      "number": "42"
+    }
+  ],
   "externalRepos": [],
   "allLinks": [],
   "warnings": []
 }
 ```
 
-The `sources` array lists every input that resolved to this candidate, and `sourceTypes` mirrors it with the classifier's label for each source (`portfolio`, `resume_file`, `resume_url`, `git_profile`, `repo_url`, etc.).
+Candidates whose sources cannot be resolved to any Git username are written to `unresolved/` with a sanitized filename rather than a username. See [Output Options](/cli/output-options) for the full directory structure.
 
-Candidates that could not be resolved to any git username are collected separately with `candidateUsername: null` and written to `unresolved/` when `--output-dir` is used.
+## Privacy
 
 <Note>
-  All processing happens locally. Your CSV data, PDF files, and resolved candidate profiles are never sent to any external server. The only outbound network requests are the page fetches and scrapes GitResolve makes to the portfolio URLs and git provider pages you supply.
+  All processing happens locally on your machine. No candidate data — portfolio URLs, resume text, or resolved profiles — is sent to any external server by GitResolve. The only outbound network requests are the page fetches to the candidate URLs themselves.
 </Note>
+
+It is good practice to add your data directories to `.gitignore` so that candidate materials are not accidentally committed to version control:
+
+```gitignore
+data/resumes/
+data/portfolio_links.csv
+results/
+```

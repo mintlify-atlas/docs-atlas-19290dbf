@@ -1,10 +1,10 @@
 ---
-title: "GitResolve Programmatic API Reference"
+title: "GitResolve Programmatic API — Complete Reference"
 sidebarTitle: "Overview"
-description: "Import @clyrisai/gitresolve directly into your Node.js or Bun backend to resolve candidate profiles, scrape portfolios, and parse resumes programmatically."
+description: "Install @clyrisai/gitresolve and use its full programmatic API to resolve portfolio URLs, resume PDFs, and git links into structured profiles."
 ---
 
-The `@clyrisai/gitresolve` programmatic API is a first-class alternative to the CLI, designed for backend pipelines that need to resolve candidate portfolios, resume PDFs, and raw URLs into structured GitHub, GitLab, and Bitbucket profiles. Every capability exposed by the CLI is available as a named export, giving you full control over provider selection, error handling, and result processing in your own code.
+The GitResolve programmatic API gives you direct access to every stage of the resolution pipeline — input classification, portfolio scraping, resume parsing, owner disambiguation, and browser provider management — so you can integrate candidate profile extraction into any Node.js application. While the CLI is ideal for one-off or shell-based workflows, the library API is designed for systems that need to process multiple candidates concurrently, persist results, or compose custom pipelines.
 
 ## Installation
 
@@ -12,77 +12,130 @@ The `@clyrisai/gitresolve` programmatic API is a first-class alternative to the 
 npm install @clyrisai/gitresolve
 ```
 
-## Canonical Integration Pattern
+GitResolve requires **Node.js 18 or later** (native `fetch` and `ReadableStream` are used internally). For full JavaScript-rendered portfolio scraping you will also want a browser peer dependency:
 
-The following example shows the standard way to scrape a candidate portfolio and parse a resume PDF in a single session, sharing one browser provider between both operations.
+```bash
+# Option A — local headless Chrome
+npm install puppeteer
+
+# Option B — point at a running Browserless instance (no extra npm dep)
+export BROWSERLESS_URL=http://localhost:3000
+```
+
+## Canonical integration pattern
+
+The most common production pattern combines `createProvider`, `scrapePortfolio`, and `parseResume`. Always call `provider.cleanup()` in a `finally` block so browser processes are never left dangling.
 
 ```typescript
-import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresolve';
+import {
+  createProvider,
+  scrapePortfolio,
+  parseResume,
+} from '@clyrisai/gitresolve';
 
-const provider = await createProvider(); // auto-selects best available
+const provider = await createProvider(); // auto-detects best available
 
 try {
-  // Scrape a portfolio
-  const portfolio = await scrapePortfolio('https://janedoe.dev', provider);
-  console.log('Owner:', portfolio.ownerProfile?.username);
-  console.log('Confidence:', portfolio.confidence);
-  console.log('Owned repos:', portfolio.ownedRepos.length);
-  console.log('Contributions:', portfolio.contributions.length);
+  const [portfolioResult, resumeResult] = await Promise.all([
+    scrapePortfolio('https://janedoe.dev', provider),
+    parseResume('./resumes/janedoe.pdf'),
+  ]);
 
-  // Parse a resume PDF
-  const resume = await parseResume('./resumes/janedoe.pdf');
-  console.log('Found links:', resume.allLinks.length);
+  console.log('Portfolio owner:', portfolioResult.ownerProfile?.username);
+  console.log('Confidence:',     portfolioResult.confidence);
+  console.log('Owned repos:',    portfolioResult.ownedRepos.length);
+
+  console.log('Resume owner:',   resumeResult.ownerProfile?.username);
+  console.log('Warnings:',       resumeResult.warnings);
 } finally {
   await provider.cleanup();
 }
 ```
 
 <Note>
-  Always call `provider.cleanup()` in a `finally` block. Skipping it can leave headless browser processes or open connections running in the background.
+  Neither `scrapePortfolio` nor `parseResume` ever throws. Any failure is captured in `result.error` so a `try/finally` around `cleanup()` is sufficient — you do not need a `catch` block for the resolution functions themselves.
 </Note>
 
-## All Exports
+## Export reference
 
-Every public export is organized below by functional category. All TypeScript types are bundled with the package — no separate `@types/` installation is needed.
+All public exports are grouped below. Click any category to jump to the dedicated reference page.
 
-| Export | Category | Description |
+### Classifier
+
+| Export | Kind | Description |
 |---|---|---|
-| `classifyInput` | Classifier | Determine input type |
-| `parseRepoUrl` | Classifier | Parse and validate a repo URL |
-| `parseGitLink` | Classifier | Extract a typed git link from a URL |
-| `extractGitUrlsFromText` | Classifier | Find all git URLs in raw text |
-| `isGitProviderUrl` | Classifier | Check if a URL is from GitHub/GitLab/Bitbucket |
-| `scrapePortfolio` | Scraper | Scrape a portfolio/profile page |
-| `extractLinksFromHtml` | Scraper | Extract all links from HTML |
-| `parseResume` | Resume | Parse a resume PDF for git links |
-| `resolveOwnerAndCategorize` | Disambiguator | Resolve ownership from extracted links |
-| `dedupeProfilesByUsername` | Disambiguator | Deduplicate profile links by username |
-| `createProvider` | Browser | Create a browser provider instance |
-| `FetchProvider` | Browser | Native fetch provider class |
-| `PuppeteerProvider` | Browser | Puppeteer headless browser class |
-| `BrowserlessProvider` | Browser | Browserless REST API class |
-| `GIT_HOSTS` | Constants | Map of git hostnames to providers |
+| `classifyInput` | function | Categorise any string as a repo URL, git profile, portfolio, resume file, etc. |
+| `parseRepoUrl` | function | Fully parse a GitHub / GitLab / Bitbucket repo URL into structured data |
+| `parseGitLink` | function | Classify a raw git-provider URL as profile, repo, gist, PR, or issue |
+| `extractGitUrlsFromText` | function | Regex-extract all git provider URLs from a block of plain text |
+| `isGitProviderUrl` | function | Boolean check — is this URL on a supported git host? |
+| `GIT_HOSTS` | constant | Map of recognised hostnames to `GitProvider` values |
 
-<Note>
-  All TypeScript types (`InputType`, `GitProvider`, `ParsedRepo`, `GitLinkType`, `ExtractedGitLink`, `ResolverResult`, `BrowserProvider`, `BrowserProviderOptions`, `ProviderName`) are re-exported directly from `@clyrisai/gitresolve`. No `@types/` package is required.
-</Note>
+### Portfolio Scraper
 
-## Explore the API
+| Export | Kind | Description |
+|---|---|---|
+| `scrapePortfolio` | async function | Fetch a portfolio page and return a full `ResolverResult` |
+| `extractLinksFromHtml` | function | Pull all `href` values and git URLs out of raw HTML |
+
+### Resume Parser
+
+| Export | Kind | Description |
+|---|---|---|
+| `parseResume` | async function | Parse a local PDF resume and return a full `ResolverResult` |
+
+### Disambiguator
+
+| Export | Kind | Description |
+|---|---|---|
+| `resolveOwnerAndCategorize` | function | Determine the candidate owner from a list of `ExtractedGitLink` objects |
+| `dedupeProfilesByUsername` | function | Remove duplicate profile links with the same username (case-insensitive) |
+
+### Browser providers
+
+| Export | Kind | Description |
+|---|---|---|
+| `createProvider` | async function | Auto-detect or explicitly select a `BrowserProvider` |
+| `FetchProvider` | class | Plain `fetch`-based provider, always available |
+| `PuppeteerProvider` | class | Full headless Chrome via Puppeteer |
+| `BrowserlessProvider` | class | Full JS rendering via a Browserless REST endpoint |
+| `BrowserProvider` | interface | The common contract every provider implements |
+| `BrowserProviderOptions` | interface | `timeout` and `waitUntil` options passed to `getPageContent` |
+| `ProviderName` | type | `'puppeteer' \| 'browserless' \| 'fetch'` |
+
+### Types
+
+| Export | Kind | Description |
+|---|---|---|
+| `InputType` | type | Union of possible input classifications |
+| `GitProvider` | type | `'github' \| 'gitlab' \| 'bitbucket'` |
+| `GitLinkType` | type | Union of link classifications (profile, repo, gist, PR, issue, other) |
+| `ParsedRepo` | interface | Structured data from a parsed repo URL |
+| `ExtractedGitLink` | interface | A single classified git URL with username, repo, and type |
+| `ResolverResult` | interface | Complete resolution output for one source |
+| `AggregatedResult` | interface | Combined output when merging multiple sources |
+
+---
+
+## API pages
 
 <CardGroup cols={2}>
-  <Card title="Classifier" icon="magnifying-glass" href="/api/classify-input">
-    `classifyInput`, `parseRepoUrl`, `parseGitLink`, `extractGitUrlsFromText`, and `isGitProviderUrl` — detect and parse any git-related input string.
+  <Card title="Classifier" icon="tag" href="/api/classify-input">
+    `classifyInput`, `parseRepoUrl`, `parseGitLink`, `extractGitUrlsFromText`, `isGitProviderUrl`, and `GIT_HOSTS`
   </Card>
   <Card title="Portfolio Scraper" icon="globe" href="/api/scrape-portfolio">
-    `scrapePortfolio` and `extractLinksFromHtml` — fetch and parse portfolio pages into structured git link sets.
+    `scrapePortfolio` and `extractLinksFromHtml`
   </Card>
   <Card title="Resume Parser" icon="file-pdf" href="/api/parse-resume">
-    `parseResume` — extract git profile and repo links from PDF resume files.
+    `parseResume` — dual-method PDF extraction with `unpdf`
   </Card>
-  <Card title="Disambiguator" icon="circle-nodes" href="/api/resolve-owner">
-    `resolveOwnerAndCategorize` and `dedupeProfilesByUsername` — resolve ownership and deduplicate across multiple sources.
+  <Card title="Disambiguator" icon="user-check" href="/api/resolve-owner">
+    `resolveOwnerAndCategorize` and `dedupeProfilesByUsername`
   </Card>
-  <Card title="Browser Providers" icon="browser" href="/api/create-provider">
-    `createProvider`, `FetchProvider`, `PuppeteerProvider`, and `BrowserlessProvider` — control how pages are fetched.
+  <Card title="createProvider" icon="browser" href="/api/create-provider">
+    Browser provider factory, all three provider classes, and the `BrowserProvider` interface
+  </Card>
+  <Card title="Types" icon="brackets-curly" href="/api/types">
+    Complete TypeScript type reference for every exported interface and union type
   </Card>
 </CardGroup>

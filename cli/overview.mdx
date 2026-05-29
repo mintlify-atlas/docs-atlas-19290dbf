@@ -1,77 +1,116 @@
 ---
-title: "GitResolve CLI: Process Portfolios and Resumes from Terminal"
+title: "GitResolve CLI: Resolve Portfolios & Resumes"
 sidebarTitle: "Overview"
-description: "The gitresolve CLI resolves portfolio URLs, git profiles, repository links, and resume PDFs into structured candidate profiles directly from your terminal."
+description: "Learn how to use the gitresolve CLI to turn candidate portfolios, resume PDFs, and raw URLs into structured GitHub, GitLab, and Bitbucket profiles."
 ---
 
-The `gitresolve` CLI takes candidate data from the command line — a single portfolio URL, a GitHub profile, a repository link, or a resume PDF — and returns a structured profile containing the candidate's git identity, owned repositories, contributions, and external references. It runs entirely on your machine: no data leaves your environment.
+The `gitresolve` CLI is the fastest way to resolve candidate portfolios, resume PDFs, and Git profile URLs into structured data — including owned repositories, contributions, and confidence scores. You can process a single URL interactively, or run batch jobs across an entire CSV of portfolio links and a directory of PDF resumes in one command.
 
-## Options Reference
+## Installation
 
-The table below covers every flag the CLI accepts. Flags are grouped by purpose.
-
-| Flag | Description |
-|------|-------------|
-| `[url]` | Direct URL or file path to process (portfolio, profile, repo, or resume) |
-| `--type <type>` | Hint the input type: `portfolio` or `resume` |
-| `--all` | Process both portfolio CSV and resumes directory |
-| `--portfolios` | Process portfolio links from CSV only |
-| `--resumes` | Process resume PDFs from directory only |
-| `--portfolio-csv <path>` | Path to portfolio CSV (default: `./data/portfolio_links.csv`) |
-| `--resumes-dir <path>` | Path to resumes directory (default: `./data/resumes`) |
-| `--output-dir <dir>` | Write per-candidate JSON files to a directory |
-| `--json` | Output raw JSON array to stdout |
-| `--provider <name>` | Browser provider: `puppeteer`, `browserless`, or `fetch` |
-| `--browserless-url <url>` | Browserless instance URL |
-| `-V, --version` | Output the installed version number |
-| `-h, --help` | Display help text |
-
-## Quick Examples
-
-The snippets below show the most common invocation patterns.
+GitResolve can be invoked on demand with `npx` or installed globally for repeated use.
 
 ```bash
-# Process a single portfolio site
-gitresolve https://janedoe.dev
+# Zero-install, on-demand
+npx @clyrisai/gitresolve --help
 
-# Process a GitHub profile
-gitresolve https://github.com/janedoe
+# Global install (recommended for frequent use)
+npm install -g @clyrisai/gitresolve
 
-# Process a local resume PDF
-gitresolve ./resumes/janedoe.pdf
-
-# Batch-process both portfolios CSV and resumes directory
-gitresolve --all
-
-# Output raw JSON to stdout
-gitresolve --all --json
-
-# Save per-candidate JSON files to a directory
-gitresolve --all --output-dir results/
+# Global install with JavaScript rendering support
+npm install -g @clyrisai/gitresolve puppeteer
 ```
 
 ## Default Behavior
 
-When you run `gitresolve` with no positional URL argument and no batch flag, the CLI assumes `--all` and processes both `./data/portfolio_links.csv` and all PDF files found under `./data/resumes/`. This means a bare `gitresolve` call in a properly structured project directory is all you need for a full batch run.
+Running `gitresolve` with no arguments and no mode flags is equivalent to passing `--all`. The CLI reads portfolio URLs from `./data/portfolio_links.csv` and scans every PDF file inside `./data/resumes/`.
 
 ```bash
-# Equivalent to: gitresolve --all
+# These two commands are identical
 gitresolve
+gitresolve --all
+```
+
+## Options Reference
+
+| Flag | Argument | Default | Description |
+|---|---|---|---|
+| `[url]` | URL or file path | — | Direct URL or local file path to process |
+| `--type` | `portfolio` \| `resume` | — | Override the auto-detected input type |
+| `--portfolios` | — | — | Process portfolio links from the CSV file |
+| `--resumes` | — | — | Process all PDF resumes from the resumes directory |
+| `--all` | — | — | Process both portfolios and resumes (also the default) |
+| `--portfolio-csv` | `<path>` | `./data/portfolio_links.csv` | Path to the portfolio CSV file |
+| `--resumes-dir` | `<path>` | `./data/resumes` | Path to the resumes directory |
+| `--provider` | `puppeteer` \| `browserless` \| `fetch` | auto | Browser rendering provider |
+| `--browserless-url` | `<url>` | `$BROWSERLESS_URL` | Browserless instance URL |
+| `--json` | — | — | Print results as a JSON array to stdout |
+| `--output-dir` | `<dir>` | — | Write per-candidate JSON files to a directory |
+| `-V, --version` | — | — | Print the installed version number |
+| `-h, --help` | — | — | Display help text |
+
+<Note>
+  `--portfolio-csv` and `--resumes-dir` also read from the `PORTFOLIO_CSV` and `RESUMES_DIR` environment variables respectively, making them easy to configure in CI or Docker environments.
+</Note>
+
+## Quick Examples
+
+```bash
+# Resolve a single portfolio website
+gitresolve https://janedoe.dev
+
+# Resolve a GitHub profile directly
+gitresolve https://github.com/janedoe
+
+# Resolve a remote resume PDF
+gitresolve https://example.com/janedoe-resume.pdf
+
+# Batch: process both CSVs and PDFs, print JSON to stdout
+gitresolve --all --json
+
+# Batch: process both sources and save results to disk
+gitresolve --all --output-dir ./results
+
+# Force a URL to be treated as a resume
+gitresolve https://example.com/cv --type resume
+
+# Use a custom CSV and resumes folder
+gitresolve --portfolios --portfolio-csv ./candidates.csv
+gitresolve --resumes --resumes-dir ./uploads/pdfs
+
+# Use a Browserless container for JS-rendered SPAs
+gitresolve --portfolios --browserless-url http://localhost:3000
 ```
 
 ## Explore the CLI
 
 <CardGroup cols={2}>
-  <Card title="Single URL" icon="link" href="/cli/single-url">
-    Process one portfolio, profile, repo, or resume at a time directly from the command line.
+  <Card
+    title="Single URL"
+    icon="link"
+    href="/cli/single-url"
+  >
+    Pass a portfolio, Git profile, repo URL, or resume as a positional argument and see what GitResolve resolves.
   </Card>
-  <Card title="Batch Processing" icon="layer-group" href="/cli/batch-processing">
-    Process a CSV of portfolio links and a directory of resume PDFs in a single command.
+  <Card
+    title="Batch Processing"
+    icon="table"
+    href="/cli/batch-processing"
+  >
+    Process an entire CSV of portfolio links and a directory of PDF resumes in one command.
   </Card>
-  <Card title="Output Options" icon="terminal" href="/cli/output-options">
-    Choose between terminal display, JSON stdout, or per-candidate files on disk.
+  <Card
+    title="Output Options"
+    icon="brackets-curly"
+    href="/cli/output-options"
+  >
+    Choose between the ANSI terminal table, raw JSON to stdout, or per-candidate files written to disk.
   </Card>
-  <Card title="Browser Providers" icon="globe" href="/providers/overview">
-    Configure Puppeteer, Browserless, or plain fetch for scraping JS-heavy portfolio sites.
+  <Card
+    title="Browser Providers"
+    icon="browser"
+    href="/providers/overview"
+  >
+    Configure Puppeteer, Browserless, or plain fetch to control how GitResolve renders portfolio pages.
   </Card>
 </CardGroup>
