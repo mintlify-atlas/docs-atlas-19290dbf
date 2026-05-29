@@ -217,7 +217,7 @@ import { scrapePortfolio } from '@clyrisai/gitresolve';
 const provider = new MyCustomProvider();
 
 try {
-  const result = await scrapePortfolio('https://janedoe.dev', { provider });
+  const result = await scrapePortfolio('https://janedoe.dev', provider);
 } finally {
   await provider.cleanup();
 }

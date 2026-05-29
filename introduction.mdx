@@ -37,11 +37,11 @@ Every input type below can be passed directly to the CLI or to `scrapePortfolio`
 
 ## Browser Providers
 
-GitResolve supports three strategies for fetching page content. It auto-detects the best available provider at runtime — you only need to intervene when you want to force a specific one.
+GitResolve supports three strategies for fetching page content. Puppeteer is bundled as a dependency and used by default when available — you only need to intervene when you want to force a specific provider or use Browserless.
 
 | Provider | How to Enable | JS Rendering | Best For |
 |---|---|---|---|
-| `puppeteer` | `npm install puppeteer` | ✅ Full | SPAs, JavaScript-heavy portfolio sites |
+| `puppeteer` | Bundled — available by default | ✅ Full | SPAs, JavaScript-heavy portfolio sites |
 | `browserless` | Run the Docker container | ✅ Full | Server environments, CI/CD pipelines |
 | `fetch` | Built-in, no install needed | ❌ None | Static HTML sites, fast fallback |
 

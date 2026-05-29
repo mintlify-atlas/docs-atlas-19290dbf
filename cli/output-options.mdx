@@ -26,7 +26,7 @@ gitresolve --all --json
 
 ### Output Directory (`--output-dir <dir>`)
 
-The `--output-dir` flag writes one JSON file per candidate to disk. Resolved candidates (those with an identified git username) are placed under `<dir>/resolved/<username>.json`. Candidates that could not be linked to any git profile are placed under `<dir>/unresolved/<name>.json`.
+The `--output-dir` flag writes one JSON file per candidate to disk. Resolved candidates (those with an identified git username) are placed under `<dir>/resolved/<username>.json`. Candidates that could not be linked to any git profile are placed under `<dir>/unresolved/<sanitized_source_name>_<N>.json`, where the filename is derived from the basename of the first source (with non-alphanumeric characters replaced by `_`) and `N` is a counter.
 
 ```bash
 gitresolve --all --output-dir results/
@@ -63,10 +63,10 @@ results/
 │   ├── janedoe.json
 │   └── johndoe.json
 └── unresolved/
-    └── unknown_resume_1.json
+    └── mystery_candidate_pdf_1.json
 ```
 
-Each file under `resolved/` is named after the candidate's lowercase git username. Files under `unresolved/` are given a generated name derived from the source file or URL.
+Each file under `resolved/` is named after the candidate's git username. Files under `unresolved/` are named by taking the basename of the first source path or URL, replacing every non-alphanumeric character with `_`, and appending a counter — so `mystery candidate.pdf` becomes `mystery_candidate_pdf_1.json`.
 
 ## AggregatedResult JSON Shape
 

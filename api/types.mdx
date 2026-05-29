@@ -1,7 +1,7 @@
 ---
 title: "TypeScript Types Reference for @clyrisai/gitresolve"
 sidebarTitle: "Types"
-description: "Complete TypeScript type definitions for GitResolve: InputType, GitProvider, ExtractedGitLink, ResolverResult, AggregatedResult, BrowserProvider, and more."
+description: "Complete TypeScript type definitions for GitResolve: InputType, GitProvider, ExtractedGitLink, ResolverResult, BrowserProvider, and more."
 ---
 
 This page is the canonical reference for every TypeScript type exported by `@clyrisai/gitresolve`. All types are pure interfaces and union types — there are no classes to instantiate unless you are implementing a custom `BrowserProvider`. Import only what you need; tree-shaking eliminates unused type imports at compile time.
@@ -20,12 +20,15 @@ import type {
   ParsedRepo,
   ExtractedGitLink,
   ResolverResult,
-  AggregatedResult,
   BrowserProvider,
   BrowserProviderOptions,
   ProviderName,
 } from '@clyrisai/gitresolve';
 ```
+
+<Note>
+  `AggregatedResult` is defined in the package's `types.ts` source file but is **not** re-exported from the public package index. It is not importable from `@clyrisai/gitresolve` at runtime. Its shape is documented below for reference when working with aggregation patterns, but you cannot use `import type { AggregatedResult }` in your own code.
+</Note>
 
 The `GIT_HOSTS` constant is a runtime value and must be imported without the `type` modifier:
 
@@ -37,7 +40,7 @@ import { GIT_HOSTS } from '@clyrisai/gitresolve';
 
 ## InputType
 
-`InputType` classifies what kind of source was passed to the resolver. It is set on `ResolverResult.sourceType` and `AggregatedResult.sourceTypes` so downstream code can decide how to handle each result.
+`InputType` classifies what kind of source was passed to the resolver. It is set on `ResolverResult.sourceType` so downstream code can decide how to handle each result.
 
 ```typescript
 type InputType =
@@ -299,6 +302,10 @@ interface ResolverResult {
 ---
 
 ## AggregatedResult
+
+<Note>
+  `AggregatedResult` is defined in the package source but is **not** exported from the public package index. You cannot import it from `@clyrisai/gitresolve`. It is documented here as a reference for its shape, which may be useful if you are building your own aggregation layer on top of multiple `ResolverResult` objects.
+</Note>
 
 Combines multiple `ResolverResult` objects — from different sources that were determined to belong to the same candidate — into a single de-duplicated profile. Used when a candidate provides both a portfolio URL and a resume file, for example.
 

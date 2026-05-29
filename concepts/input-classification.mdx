@@ -12,13 +12,13 @@ Every input resolves to one of these seven values:
 
 | Value | Meaning |
 |---|---|
-| `repo_url` | A GitHub, GitLab, or Bitbucket repository URL (e.g. `github.com/user/repo`) |
-| `git_profile` | A GitHub, GitLab, or Bitbucket profile URL (e.g. `github.com/user`) |
+| `repo_url` | A GitHub, GitLab, or Bitbucket repository URL (e.g. `https://github.com/user/repo`) |
+| `git_profile` | A GitHub, GitLab, or Bitbucket profile URL (e.g. `https://github.com/user`) |
 | `portfolio` | Any other valid URL — personal sites, project pages, hosted portfolios |
-| `resume_file` | A local file path ending in `.pdf`, `.doc`, `.docx`, or `.rtf` |
+| `resume_file` | Any input string ending in `.pdf`, `.doc`, `.docx`, or `.rtf` — matched before URL parsing, so this includes remote URLs whose path ends with those extensions |
 | `resume_url` | A remote URL pointing directly to a PDF document |
 | `linkedin` | A LinkedIn URL — recognized and flagged, but not resolved |
-| `unknown` | Anything that cannot be parsed as a URL and does not match a file extension |
+| `unknown` | Any input that cannot be parsed as a URL and does not match a file extension, or a bare git provider URL with no path (e.g. `https://github.com` with no username segment) |
 
 ## Classification Decision Flow
 
@@ -26,12 +26,13 @@ GitResolve applies rules in strict priority order. The first rule that matches w
 
 <Steps>
   <Step title="Check for a resume file extension">
-    If the input string ends with `.pdf`, `.doc`, `.docx`, or `.rtf` (case-insensitive), it is classified as `resume_file` immediately — no URL parsing is attempted.
+    If the input string ends with `.pdf`, `.doc`, `.docx`, or `.rtf` (case-insensitive), it is classified as `resume_file` immediately — no URL parsing is attempted. This check runs against the raw input string, so it applies to local file paths and remote URLs alike: a URL whose path ends in `.pdf` is caught here before any URL parsing occurs.
 
     ```
-    ./resume.pdf       → resume_file
-    /tmp/cv.docx       → resume_file
-    ../docs/cv.RTF     → resume_file
+    ./resume.pdf                           → resume_file
+    /tmp/cv.docx                           → resume_file
+    ../docs/cv.RTF                         → resume_file
+    https://example.com/assets/cv.pdf      → resume_file
     ```
   </Step>
 
@@ -39,7 +40,7 @@ GitResolve applies rules in strict priority order. The first rule that matches w
     The input is passed to the WHATWG `URL` constructor. If parsing throws (e.g. bare text with no scheme, a malformed string), the input is classified as `unknown` and no further steps run.
 
     <Note>
-      Bare git provider URLs without a scheme — such as `github.com/janedoe` — are automatically prefixed with `https://` before parsing. This normalization happens before classification so that shorthand URLs resolve correctly.
+      `classifyInput` does not add an `https://` prefix automatically. Inputs without a scheme — such as `github.com/janedoe` — will fail URL parsing and be classified as `unknown`. Always pass fully-qualified URLs (including the scheme) to `classifyInput` and `resolve()`.
     </Note>
   </Step>
 
@@ -50,16 +51,17 @@ GitResolve applies rules in strict priority order. The first rule that matches w
   <Step title="Attempt repo URL parsing">
     GitResolve calls `parseRepoUrl()` on the normalized URL. This validates that the URL points to a recognized git provider (`github.com`, `gitlab.com`, `bitbucket.org`) and has at least two non-reserved path segments (`owner/repo`). If the parse succeeds, the input is classified as `repo_url`.
 
-    This step also detects pull request and issue URLs — for example, `github.com/user/repo/pull/42` parses as a `repo_url` and the contribution metadata is stored alongside it.
+    This step also detects pull request and issue URLs — for example, `https://github.com/user/repo/pull/42` parses as a `repo_url` and the contribution metadata is stored alongside it.
   </Step>
 
   <Step title="Check for a known git profile URL">
-    If the URL's hostname is a recognized git provider but `parseRepoUrl()` failed (fewer than two path segments, or a reserved path), GitResolve checks whether at least one non-reserved path segment exists. If so, the input is classified as `git_profile`.
+    If the URL's hostname is a recognized git provider (`github.com`, `www.github.com`, `gitlab.com`, `www.gitlab.com`, `bitbucket.org`, `www.bitbucket.org`) and `parseRepoUrl()` did not succeed, GitResolve examines the URL path segments. If at least one path segment is present, the input is classified as `git_profile`. If the URL has no path segments at all (e.g. a bare `https://github.com/` with no username), it is classified as `unknown` — not `portfolio`.
 
     ```
     https://github.com/janedoe     → git_profile
     https://gitlab.com/janedoe     → git_profile
     https://bitbucket.org/janedoe  → git_profile
+    https://github.com/            → unknown  (no path segments)
     ```
   </Step>
 

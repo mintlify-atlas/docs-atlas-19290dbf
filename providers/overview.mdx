@@ -11,8 +11,12 @@ GitResolve needs to fetch the content of portfolio pages, resume URLs, and profi
 | Provider | Requires | JS Rendering | Best For |
 |---|---|---|---|
 | `fetch` | Nothing (Node 18+) | ❌ None | Static sites, fallback, always works |
-| `puppeteer` | `npm install puppeteer` | ✅ Full | SPAs, JS-heavy portfolio sites |
+| `puppeteer` | Included with package | ✅ Full | SPAs, JS-heavy portfolio sites |
 | `browserless` | Docker container | ✅ Full | Server environments, CI/CD |
+
+<Note>
+  `puppeteer` is listed in `dependencies` and is installed automatically when you run `npm install @clyrisai/gitresolve`. If you install the package globally (`npm install -g @clyrisai/gitresolve`) and Puppeteer is not present, you may need to install it explicitly with `npm install puppeteer`.
+</Note>
 
 ## Auto-Detection
 
@@ -20,7 +24,7 @@ When no provider is specified, GitResolve walks a priority chain and uses the fi
 
 <Steps>
   <Step title="Puppeteer">
-    Checked first. Available if the `puppeteer` package is installed in the current project.
+    Checked first. Available if the `puppeteer` package can be imported — it is bundled with the package by default, so this succeeds in most environments.
   </Step>
   <Step title="Browserless">
     Checked second. Available if a Browserless container is reachable at `BROWSERLESS_URL` (default: `http://localhost:3000`).
@@ -57,7 +61,7 @@ const provider = await createProvider('fetch');
 ```
 
 <Note>
-  If you request a specific provider that is not available (e.g., `'puppeteer'` without the package installed), `createProvider` throws an error immediately rather than silently falling back. This makes misconfigured environments fail loudly.
+  If you request a specific provider that is not available (e.g., `'puppeteer'` without the package installed, or `'browserless'` without a reachable container), `createProvider` throws an error immediately rather than silently falling back. This makes misconfigured environments fail loudly.
 </Note>
 
 ## Provider Pages

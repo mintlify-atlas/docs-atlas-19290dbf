@@ -82,7 +82,7 @@ Returns `Promise<ResolverResult>`. The function never rejects — errors are sto
     The combined URL list is deduplicated with trailing slashes stripped (`/+$` removed), then each URL is passed through `parseGitLink()` to produce `ExtractedGitLink` objects. Results populate `result.allLinks`.
   </Step>
   <Step title="Resolve owner and categorize">
-    Passes `result.allLinks` and the `'resume'` source context to `resolveOwnerAndCategorize()`. The returned `OwnerResolution` fields are spread onto the result object.
+    Passes `result.allLinks` to `resolveOwnerAndCategorize()`. The `'resume'` string is also passed as `sourceContext` but has no effect on the algorithm. The returned `OwnerResolution` fields are spread onto the result object.
   </Step>
 </Steps>
 

@@ -9,7 +9,7 @@ GitResolve is published to npm as `@clyrisai/gitresolve` and ships a compiled `d
 ## Requirements
 
 - **Node.js >= 18.0.0** — GitResolve uses native `fetch`, top-level `await`, and ES module syntax that require Node 18 or later.
-- **Puppeteer** (optional) — install separately to enable JavaScript rendering for SPA portfolio sites. See [Optional: Puppeteer](#optional-puppeteer-for-spa-rendering) below.
+- **Puppeteer** — bundled as a dependency. For global CLI installs where Puppeteer may not be pulled in automatically, see [Global Install](#global-install) below.
 
 ## Zero-Install with npx
 
@@ -39,6 +39,12 @@ Once installed, the `gitresolve` command is available anywhere on your system:
 gitresolve https://github.com/janedoe
 gitresolve ./resumes/candidate.pdf --json
 gitresolve --all --output-dir results/
+```
+
+For global installs, Puppeteer may not be pulled in automatically depending on your environment. If you want to ensure JavaScript rendering is available for SPA portfolio sites, install Puppeteer explicitly alongside GitResolve:
+
+```bash
+npm install -g @clyrisai/gitresolve puppeteer
 ```
 
 ## Project Dependency
@@ -73,23 +79,11 @@ import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresol
 
 TypeScript types are included at `./dist/index.d.ts` and are resolved automatically by the TypeScript compiler — no `@types/gitresolve` or manual path configuration is required.
 
-## Optional: Puppeteer for SPA Rendering
+## Browser Providers
 
-<Warning>
-  Puppeteer is an **optional peer dependency** and is not bundled with `@clyrisai/gitresolve`. Without it, GitResolve falls back to plain `fetch`, which cannot render JavaScript. If you need to scrape portfolio sites built with React, Vue, Next.js, or similar frameworks, install Puppeteer separately.
-</Warning>
+GitResolve bundles Puppeteer as a dependency, so JavaScript rendering for SPA portfolio sites works out of the box when you install `@clyrisai/gitresolve` as a project dependency. `createProvider()` auto-detects the best available provider at runtime and defaults to Puppeteer when it is available.
 
-```bash
-npm install puppeteer
-```
-
-Once Puppeteer is available in your environment, `createProvider()` detects it automatically and uses it as the default browser provider. You can also force a specific provider with the `--provider` CLI flag or by passing the provider name to `createProvider()`.
-
-To install Puppeteer alongside a global GitResolve install:
-
-```bash
-npm install -g @clyrisai/gitresolve puppeteer
-```
+You can also force a specific provider with the `--provider` CLI flag or by passing the provider name to `createProvider()`.
 
 For server or CI environments where installing Chromium is undesirable, consider using the [Browserless provider](/providers/overview) instead.
 
@@ -101,8 +95,8 @@ GitResolve reads the following environment variables at runtime. All of them are
 |---|---|---|
 | `BROWSERLESS_URL` | `http://localhost:3000` | URL of your Browserless instance when using the `browserless` provider |
 | `BROWSER_PROVIDER` | *(auto-detect)* | Force a specific provider: `puppeteer`, `browserless`, or `fetch` |
-| `PORTFOLIO_CSV` | `./portfolio_links.csv` | Default path to the CSV file used by `--portfolios` and `--all` |
-| `RESUMES_DIR` | `./resumes` | Default path to the directory of PDF files used by `--resumes` and `--all` |
+| `PORTFOLIO_CSV` | `./data/portfolio_links.csv` | Default path to the CSV file used by `--portfolios` and `--all` |
+| `RESUMES_DIR` | `./data/resumes` | Default path to the directory of PDF files used by `--resumes` and `--all` |
 
 Environment variables can be set in your shell, a `.env` file loaded by your runtime, or passed inline:
 

@@ -8,14 +8,22 @@ description: "PuppeteerProvider runs headless Chromium to fully render JavaScrip
 
 ## Installation
 
-Puppeteer is an optional peer dependency. Install it explicitly in your project:
+Puppeteer is included in `@clyrisai/gitresolve`'s `dependencies` and is installed automatically when you run:
 
 ```bash
-npm install puppeteer
+npm install @clyrisai/gitresolve
 ```
 
+No separate `npm install puppeteer` step is required for local project installs.
+
 <Note>
-  If Puppeteer is not installed, `createProvider('puppeteer')` will throw an error. When using auto-detection via `createProvider()` with no argument, GitResolve will skip Puppeteer and try the next provider in the chain — no crash, no configuration needed.
+  If you install GitResolve globally (`npm install -g @clyrisai/gitresolve`) and Puppeteer is not available in that environment, you will need to install it explicitly:
+
+  ```bash
+  npm install -g puppeteer
+  ```
+
+  When using auto-detection via `createProvider()` with no argument, GitResolve will skip Puppeteer if it cannot be imported and try the next provider in the chain — no crash, no configuration needed.
 </Note>
 
 ## Usage

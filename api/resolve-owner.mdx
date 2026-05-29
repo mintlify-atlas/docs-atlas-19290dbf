@@ -25,7 +25,7 @@ export function resolveOwnerAndCategorize(
 </ParamField>
 
 <ParamField path="sourceContext" type="string">
-  An optional context hint describing where the links came from. Currently passed through to warning messages. Conventionally `'portfolio'` (set by `scrapePortfolio`) or `'resume'` (set by `parseResume`). Has no effect on the disambiguation algorithm itself.
+  An optional context hint describing where the links came from. Conventionally `'portfolio'` (set by `scrapePortfolio`) or `'resume'` (set by `parseResume`). This parameter is accepted for forward-compatibility but is not currently used anywhere in the function body — it has no effect on either the disambiguation algorithm or the warning messages produced.
 </ParamField>
 
 <ParamField path="knownOwnerProfile" type="ExtractedGitLink">
@@ -147,8 +147,7 @@ console.log(resolution.confidence);              // 'high'
 console.log(resolution.ownedRepos.length);       // 1  (janedoe/portfolio)
 console.log(resolution.externalRepos.length);    // 1  (facebook/react)
 console.log(resolution.warnings);
-// ['Used janedoe provider for page content'] — no, actually:
-// ['Owner strictly determined by...'] or confidence path warnings
+// e.g. ['Single unique profile found — high confidence'] or other disambiguation path messages
 ```
 
 <CodeGroup>

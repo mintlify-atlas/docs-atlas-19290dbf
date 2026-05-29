@@ -98,7 +98,7 @@ Every call to `resolve()` returns a `ResolverResult` — a fully typed object th
   "allLinks": ["... all ExtractedGitLink objects ..."],
   "warnings": [
     "Used fetch provider (SPA rendering layer like Puppeteer/Browserless is missing)",
-    "Owner strictly determined by profile URL input: janedoe"
+    "Owner determined by repo cross-reference: janedoe(3 repos), acmecorp(1 repos)"
   ]
 }
 ```
@@ -248,9 +248,9 @@ The `warnings` array is populated throughout processing and is the primary tool 
 
 ---
 
-## The error Field
+## The error Field (ResolverResult only)
 
-The `error` field is set when an unhandled exception occurs during scraping or parsing — for example, a network timeout fetching a portfolio, a corrupted PDF file, or an unexpected DOM structure. GitResolve catches all errors internally and never re-throws them, so a single failing source does not abort a batch.
+The `error` field exists on `ResolverResult` only — `AggregatedResult` does not carry an `error` field. It is set when an unhandled exception occurs during scraping or parsing — for example, a network timeout fetching a portfolio, a corrupted PDF file, or an unexpected DOM structure. GitResolve catches all errors internally and never re-throws them, so a single failing source does not abort a batch.
 
 When `error` is present:
 - `ownerProfile` will be `null`

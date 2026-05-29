@@ -24,7 +24,7 @@ GitResolve works in two modes: a CLI you can run immediately with `npx` and a pr
     npm install -g @clyrisai/gitresolve
     ```
 
-    For full installation options including package manager commands and the optional Puppeteer peer dependency, see the [Installation guide](/installation).
+    For full installation options including package manager commands, see the [Installation guide](/installation).
 
   </Step>
 
@@ -137,7 +137,7 @@ GitResolve works in two modes: a CLI you can run immediately with `npx` and a pr
     ```
 
     <Note>
-      Puppeteer is an optional peer dependency. If it is not installed, `createProvider()` automatically falls back to `fetch`, which handles static HTML pages but cannot render JavaScript-heavy SPAs. Install `puppeteer` separately if you need full JS rendering for portfolio sites built with React, Vue, or similar frameworks.
+      Puppeteer is bundled with `@clyrisai/gitresolve` as a dependency, so JavaScript rendering for SPA portfolio sites works out of the box. `createProvider()` automatically selects the best available provider — defaulting to Puppeteer when it is present and falling back to plain `fetch` otherwise. `fetch` handles static HTML pages but cannot render JavaScript-heavy SPAs.
     </Note>
 
     **Full `ResolverResult` shape** — every call to `scrapePortfolio` or `parseResume` returns this structure:
