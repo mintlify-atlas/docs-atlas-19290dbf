@@ -1,0 +1,229 @@
+---
+title: "scrapePortfolio and extractLinksFromHtml — Scraper API"
+sidebarTitle: "Scraper"
+description: "scrapePortfolio fetches a URL with a BrowserProvider, extracts git links, and returns a ResolverResult with the candidate's resolved profile and repos."
+---
+
+The scraper API is the primary entry point for resolving a candidate's git presence from a web URL. `scrapePortfolio` orchestrates page fetching, link extraction, git URL filtering, and owner disambiguation into a single call that always returns a typed `ResolverResult` — even when something goes wrong.
+
+## scrapePortfolio
+
+`scrapePortfolio` fetches the rendered HTML of a URL using the provided `BrowserProvider`, extracts all git provider links, and resolves which profile belongs to the candidate. It never throws — any fetch or parsing error is captured in `result.error`.
+
+```typescript
+export async function scrapePortfolio(
+  url: string,
+  provider: BrowserProvider,
+  knownOwnerProfile?: ExtractedGitLink
+): Promise<ResolverResult>
+```
+
+### Parameters
+
+<ParamField path="url" type="string" required>
+  The portfolio, personal site, or git profile URL to scrape. Passed directly to `provider.getPageContent(url)` — any URL the provider can render is valid (e.g. `https://janedoe.dev`, `https://github.com/janedoe`).
+</ParamField>
+
+<ParamField path="provider" type="BrowserProvider" required>
+  A `BrowserProvider` instance obtained from `createProvider()`. The provider determines how the page is fetched — fetch-based (plain HTTP) or headless-browser-based (Puppeteer, Browserless). The provider's `name` is always recorded in `result.warnings`.
+</ParamField>
+
+<ParamField path="knownOwnerProfile" type="ExtractedGitLink">
+  An optional pre-resolved owner profile. When provided, `resolveOwnerAndCategorize` skips all disambiguation logic and sets `confidence` to `'high'` immediately. Use this when the URL structure already tells you who the candidate is — for example, a direct GitHub profile URL like `https://github.com/janedoe`.
+</ParamField>
+
+### Return Value
+
+Returns `Promise<ResolverResult>`. The function never rejects — errors are stored in `result.error` instead.
+
+<ResponseField name="source" type="string">
+  The original `url` argument passed to `scrapePortfolio`.
+</ResponseField>
+
+<ResponseField name="sourceType" type='"portfolio"'>
+  Always `'portfolio'` for results from this function.
+</ResponseField>
+
+<ResponseField name="ownerProfile" type="ExtractedGitLink | null">
+  The resolved candidate profile, or `null` if no git links were found or disambiguation failed.
+</ResponseField>
+
+<ResponseField name="confidence" type='"high" | "medium" | "low" | "none"'>
+  How certain the disambiguator is about the resolved owner. `'high'` is set when `knownOwnerProfile` is provided, when exactly one unique profile username is found, or when one profile clearly dominates by repo count. See [Disambiguator](/api/resolve-owner) for the full logic.
+</ResponseField>
+
+<ResponseField name="ownedRepos" type="ExtractedGitLink[]">
+  Repo links where `link.username` matches the resolved owner's username (case-insensitive).
+</ResponseField>
+
+<ResponseField name="contributions" type="ExtractedGitLink[]">
+  Links with `type === 'pull_request'` or `type === 'issue'` — explicit contribution signals.
+</ResponseField>
+
+<ResponseField name="externalRepos" type="ExtractedGitLink[]">
+  Repo links where the username does not match the owner — third-party libraries, references, or collaborator repos.
+</ResponseField>
+
+<ResponseField name="allLinks" type="ExtractedGitLink[]">
+  Every parsed git link found on the page, unfiltered and uncategorized.
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]">
+  Diagnostic messages from the scraper and disambiguator. Always includes a note about which provider was used (e.g. `"Used puppeteer provider for page content"`). If the `fetch` provider was used, the warning explicitly calls out that a headless rendering layer is missing.
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Present only if the scrape failed. Contains the error message from the caught exception. All other result fields will hold their empty defaults when `error` is set.
+</ResponseField>
+
+### How It Works
+
+`scrapePortfolio` runs the following pipeline in order:
+
+<Steps>
+  <Step title="Fetch page content">
+    Calls `provider.getPageContent(url)` to get the fully-rendered HTML string. The provider name is appended to `result.warnings` regardless of what follows.
+  </Step>
+  <Step title="Extract all links">
+    Passes the HTML and `url` to `extractLinksFromHtml()`, which collects every `href` attribute value and any bare git URLs found in raw text. Returns a deduplicated list of absolute URL strings.
+  </Step>
+  <Step title="Filter and parse git URLs">
+    Filters the link list to only URLs on known git provider hostnames (`github.com`, `gitlab.com`, `bitbucket.org`), then calls `parseGitLink()` on each surviving URL to produce `ExtractedGitLink` objects. Results populate `result.allLinks`.
+  </Step>
+  <Step title="Resolve owner and categorize">
+    Passes `result.allLinks`, the `'portfolio'` source context, and `knownOwnerProfile` (if provided) to `resolveOwnerAndCategorize()`. The returned `OwnerResolution` fields are spread onto the result object.
+  </Step>
+</Steps>
+
+### Usage Examples
+
+<CodeGroup>
+
+```typescript Basic usage
+import { createProvider, scrapePortfolio } from '@clyrisai/gitresolve';
+
+const provider = await createProvider();
+try {
+  const result = await scrapePortfolio('https://janedoe.dev', provider);
+
+  if (result.error) {
+    console.error('Failed to scrape:', result.error);
+  } else {
+    console.log('Owner:      ', result.ownerProfile?.username);
+    console.log('Confidence: ', result.confidence);
+    console.log('Owned repos:', result.ownedRepos.map(r => r.repo));
+    console.log('External:   ', result.externalRepos.map(r => r.repo));
+  }
+} finally {
+  await provider.cleanup();
+}
+```
+
+```typescript With knownOwnerProfile (direct git profile URL)
+import { createProvider, scrapePortfolio } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+const provider = await createProvider();
+
+// When you already know the profile from the URL structure,
+// pass it as knownOwnerProfile to bypass disambiguation
+// and always receive confidence: 'high'.
+const knownOwner: ExtractedGitLink = {
+  url: 'https://github.com/janedoe',
+  provider: 'github',
+  type: 'profile',
+  username: 'janedoe',
+};
+
+const result = await scrapePortfolio(
+  'https://github.com/janedoe',
+  provider,
+  knownOwner
+);
+
+console.log(result.confidence);    // 'high'
+console.log(result.ownerProfile);  // the knownOwner object
+
+await provider.cleanup();
+```
+
+```typescript Checking for provider warnings
+import { createProvider, scrapePortfolio } from '@clyrisai/gitresolve';
+
+const provider = await createProvider();
+const result = await scrapePortfolio('https://janedoe.dev', provider);
+
+// The first warning always describes which provider fetched the page.
+// If the fetch provider was selected (no headless browser available),
+// a more prominent warning is included.
+for (const warning of result.warnings) {
+  console.log('[warn]', warning);
+}
+// e.g. "Used fetch provider (SPA rendering layer like Puppeteer/Browserless is missing)"
+// e.g. "Used puppeteer provider for page content"
+
+await provider.cleanup();
+```
+
+</CodeGroup>
+
+<Warning>
+  Always call `await provider.cleanup()` in a `finally` block. Headless browser providers hold open browser processes that must be explicitly closed.
+</Warning>
+
+---
+
+## extractLinksFromHtml
+
+`extractLinksFromHtml` is the lower-level utility used internally by `scrapePortfolio` to pull every URL out of an HTML string. It combines two extraction strategies and deduplicates the results.
+
+```typescript
+export function extractLinksFromHtml(html: string, baseUrl: string): string[]
+```
+
+### Parameters
+
+<ParamField path="html" type="string" required>
+  A raw HTML string to scan for links. Both `"..."` and `'...'` quoted `href` attributes are matched.
+</ParamField>
+
+<ParamField path="baseUrl" type="string" required>
+  The base URL used to resolve relative paths. Links starting with `/` or without a scheme are resolved using `new URL(href, baseUrl)`. Malformed relative paths that cannot be resolved are silently skipped.
+</ParamField>
+
+### Return Value
+
+Returns a `string[]` of deduplicated, absolute URL strings. The array may contain non-git URLs — filtering to git provider hosts happens upstream in `scrapePortfolio`.
+
+### How It Works
+
+The function runs two passes and merges results:
+
+1. **`href` extraction**: A regex scans for `href="..."` and `href='...'` patterns. Relative paths are resolved against `baseUrl` with `new URL()`. Anchors (`#...`) and `mailto:` links are passed through as-is.
+
+2. **Raw text extraction**: `extractGitUrlsFromText()` scans the entire HTML string (including text nodes and JavaScript blocks) for bare git provider hostnames like `github.com/username`. This catches URLs that appear in prose, JSON data attributes, or inline scripts but are not wrapped in anchor tags.
+
+Both result sets are merged into a single `Set` before being returned, ensuring no URL appears twice regardless of which pass found it.
+
+### Usage Example
+
+```typescript
+import { extractLinksFromHtml } from '@clyrisai/gitresolve';
+
+const html = await fetch('https://janedoe.dev').then(r => r.text());
+const links = extractLinksFromHtml(html, 'https://janedoe.dev');
+// Returns all href values + any git URLs found in raw text,
+// deduplicated and with relative paths resolved.
+
+console.log(links);
+// [
+//   'https://github.com/janedoe',
+//   'https://github.com/janedoe/portfolio',
+//   'https://twitter.com/janedoe',
+//   ...
+// ]
+```
+
+<Tip>
+  `extractLinksFromHtml` returns **all** links, not just git provider URLs. If you are calling it directly, filter the results with `isGitProviderUrl()` before passing them to `parseGitLink()`.
+</Tip>

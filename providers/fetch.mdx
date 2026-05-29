@@ -1,0 +1,75 @@
+---
+title: "FetchProvider: Zero-Dependency Static Page Fetching"
+sidebarTitle: "Fetch"
+description: "FetchProvider uses Node.js native fetch with no extra dependencies. Best for static portfolio sites and serves as the always-available provider fallback."
+---
+
+`FetchProvider` is the simplest way to retrieve page content in GitResolve. It uses the native `fetch` API built into Node.js 18+ to download raw HTML, sending requests under the `ClyrisBot/1.0` user-agent. Because it requires no installed packages and no external services, it is always available and acts as the guaranteed last resort in the auto-detection chain. It handles the majority of static portfolio sites — personal pages, GitHub profile READMEs, and hosted resumes — with no configuration needed.
+
+## When to Use
+
+- **Static portfolio sites** — plain HTML/CSS sites with no client-side rendering
+- **GitHub and GitLab profile pages** — server-rendered profile pages resolve cleanly with a plain HTTP request
+- **Constrained environments** — serverless functions, minimal Docker images, or any place where installing Puppeteer or running a Docker container is not practical
+- **Fallback behaviour** — when you want GitResolve to always succeed regardless of what else is installed
+
+<Warning>
+  `FetchProvider` does **not** execute JavaScript. Single-page applications built with React, Vue, Next.js, Nuxt, or similar frameworks will return empty shell HTML rather than the fully rendered content. If your candidate's portfolio site is a JavaScript SPA, use [PuppeteerProvider](/providers/puppeteer) or [BrowserlessProvider](/providers/browserless) instead.
+</Warning>
+
+## Installation
+
+No installation is required. `FetchProvider` ships with `@clyrisai/gitresolve` and depends only on the Node.js built-in `fetch` (available in Node 18 and later).
+
+## Usage
+
+### Direct instantiation
+
+```typescript
+import { FetchProvider } from '@clyrisai/gitresolve';
+
+const provider = new FetchProvider();
+const html = await provider.getPageContent('https://janedoe.dev');
+await provider.cleanup(); // no-op — nothing to release
+```
+
+### Via factory
+
+```typescript
+import { createProvider } from '@clyrisai/gitresolve';
+
+const provider = await createProvider('fetch');
+```
+
+### Via CLI
+
+```bash
+gitresolve --provider fetch https://janedoe.dev
+```
+
+## Options
+
+Pass a `BrowserProviderOptions` object as the second argument to `getPageContent` to override defaults:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeout` | `number` | `15000` | Navigation timeout in milliseconds. The request is aborted if the server does not respond within this window. |
+| `waitUntil` | — | — | Not applicable. `FetchProvider` makes a single HTTP request and returns the response body directly. |
+
+```typescript
+const html = await provider.getPageContent('https://janedoe.dev', {
+  timeout: 8000,
+});
+```
+
+## Behaviour Details
+
+- **User-Agent**: `Mozilla/5.0 (compatible; ClyrisBot/1.0)` — sent on every request to identify GitResolve traffic and avoid bot detection on sites that block empty user-agents.
+- **Redirects**: followed automatically (`redirect: 'follow'`).
+- **Error handling**: a non-2xx HTTP status throws an `Error` with the status code and status text included in the message.
+- **`isAvailable()`**: always returns `true`.
+- **`cleanup()`**: is a no-op. There is no browser instance or persistent connection to release.
+
+<Note>
+  `FetchProvider` is the automatic fallback when both Puppeteer and Browserless are unavailable. You do not need to configure anything — GitResolve will reach for it on its own if the other providers cannot be initialised.
+</Note>

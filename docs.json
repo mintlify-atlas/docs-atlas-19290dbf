@@ -1,72 +1,91 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "GitResolve",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#ffffff",
+    "light": "#3c4cfc",
+    "dark": "#3c4cfc"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/cc98de6a-6369-4703-bc59-2494b94903cb.png",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/357d578b-3f96-4b8e-9290-66d7d658983a.svg",
+    "dark": "https://media.brand.dev/357d578b-3f96-4b8e-9290-66d7d658983a.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/clyrisai/gitresolve"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/clyrisai/gitresolve"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "CLI Guide",
+            "pages": [
+              "cli/overview",
+              "cli/single-url",
+              "cli/batch-processing",
+              "cli/output-options"
+            ]
+          },
+          {
+            "group": "Browser Providers",
+            "pages": [
+              "providers/overview",
+              "providers/fetch",
+              "providers/puppeteer",
+              "providers/browserless"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/input-classification",
+              "concepts/disambiguation",
+              "concepts/result-structure"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Programmatic API",
+            "pages": [
+              "api/overview",
+              "api/classify-input",
+              "api/scrape-portfolio",
+              "api/parse-resume",
+              "api/resolve-owner",
+              "api/create-provider"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

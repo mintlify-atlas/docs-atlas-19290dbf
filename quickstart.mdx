@@ -1,47 +1,203 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with GitResolve in Under 2 Minutes"
+sidebarTitle: "Quickstart"
+description: "Resolve your first candidate GitHub profile from a portfolio URL or resume PDF using GitResolve's CLI or programmatic TypeScript API."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+GitResolve works in two modes: a CLI you can run immediately with `npx` and a programmatic TypeScript API you import directly into your application. This guide walks through both, starting from zero — no config files, no credentials, no setup beyond a Node.js install.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Install GitResolve">
+
+    The fastest way to try GitResolve is with `npx` — no global install required. For frequent use, a global install gives you the `gitresolve` command anywhere on your system.
+
+    **Zero-install (on-demand):**
 
     ```bash
-    npm install your-package
+    npx @clyrisai/gitresolve --help
     ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+    **Global install (recommended for repeated CLI use):**
 
     ```bash
-    your-cli init
+    npm install -g @clyrisai/gitresolve
     ```
+
+    For full installation options including package manager commands and the optional Puppeteer peer dependency, see the [Installation guide](/installation).
+
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+
+  <Step title="Resolve a GitHub Profile URL">
+
+    Pass any GitHub, GitLab, or Bitbucket profile URL directly as a positional argument. GitResolve classifies the input, scrapes the profile page, and returns a structured result.
 
     ```bash
-    your-cli start
+    gitresolve https://github.com/janedoe
     ```
+
+    The terminal output shows the resolved owner profile, confidence score, and a summary of owned repos, contributions, and any warnings. To get raw JSON instead, append the `--json` flag:
+
+    ```bash
+    gitresolve https://github.com/janedoe --json
+    ```
+
+    <Tip>
+      Use `--json` whenever you want machine-readable output — for example, piping results into `jq`, saving to a file, or feeding into a downstream process. The flag suppresses all UI formatting and prints a clean JSON array to stdout.
+    </Tip>
+
+    **Example JSON output shape:**
+
+    ```json
+    {
+      "source": "https://github.com/janedoe",
+      "sourceType": "git_profile",
+      "ownerProfile": {
+        "url": "https://github.com/janedoe",
+        "provider": "github",
+        "type": "profile",
+        "username": "janedoe"
+      },
+      "confidence": "high",
+      "ownedRepos": [
+        {
+          "url": "https://github.com/janedoe/my-project",
+          "provider": "github",
+          "type": "repo",
+          "username": "janedoe",
+          "repo": "my-project"
+        }
+      ],
+      "contributions": [],
+      "externalRepos": [],
+      "allLinks": [],
+      "warnings": []
+    }
+    ```
+
   </Step>
+
+  <Step title="Parse a Resume PDF">
+
+    Local PDF files and remote PDF URLs are both supported. Pass the file path directly — GitResolve detects the `.pdf` extension and routes to the resume parser automatically.
+
+    ```bash
+    gitresolve ./resume.pdf
+    ```
+
+    The parser extracts both plain text and embedded hyperlink annotations, so git URLs that aren't visible as text in the document are still captured.
+
+    To process a remote PDF:
+
+    ```bash
+    gitresolve https://example.com/candidate-resume.pdf
+    ```
+
+    If a remote URL doesn't end in `.pdf`, you can force resume treatment with the `--type` flag:
+
+    ```bash
+    gitresolve https://example.com/resume-download --type resume
+    ```
+
+  </Step>
+
+  <Step title="Use the Programmatic TypeScript API">
+
+    Install GitResolve as a project dependency to use it inside your Node.js or Bun application:
+
+    ```bash
+    npm install @clyrisai/gitresolve
+    ```
+
+    Then import and call the API directly. Always create a provider first, use it, and clean it up in a `finally` block to avoid leaving headless browser instances open.
+
+    ```typescript
+    import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresolve';
+
+    // Resolve a portfolio URL
+    const provider = await createProvider();
+    try {
+      const result = await scrapePortfolio('https://janedoe.dev', provider);
+      console.log(result.ownerProfile);
+      console.log(result.ownedRepos);
+    } finally {
+      await provider.cleanup();
+    }
+    ```
+
+    To parse a resume PDF instead, use `parseResume` — it does not require a browser provider:
+
+    ```typescript
+    import { parseResume } from '@clyrisai/gitresolve';
+
+    const result = await parseResume('./resumes/candidate1.pdf');
+    console.log('Git links found in resume:', result.allLinks.length);
+    console.log('Owner profile:', result.ownerProfile);
+    console.log('Confidence:', result.confidence);
+    ```
+
+    <Note>
+      Puppeteer is an optional peer dependency. If it is not installed, `createProvider()` automatically falls back to `fetch`, which handles static HTML pages but cannot render JavaScript-heavy SPAs. Install `puppeteer` separately if you need full JS rendering for portfolio sites built with React, Vue, or similar frameworks.
+    </Note>
+
+    **Full `ResolverResult` shape** — every call to `scrapePortfolio` or `parseResume` returns this structure:
+
+    ```json
+    {
+      "source": "https://janedoe.dev",
+      "sourceType": "portfolio",
+      "ownerProfile": {
+        "url": "https://github.com/janedoe",
+        "provider": "github",
+        "type": "profile",
+        "username": "janedoe"
+      },
+      "confidence": "high",
+      "ownedRepos": [
+        {
+          "url": "https://github.com/janedoe/my-project",
+          "provider": "github",
+          "type": "repo",
+          "username": "janedoe",
+          "repo": "my-project"
+        }
+      ],
+      "contributions": [
+        {
+          "url": "https://github.com/some-org/oss-lib/pull/12",
+          "provider": "github",
+          "type": "pull_request",
+          "username": "janedoe",
+          "repo": "oss-lib",
+          "number": "12"
+        }
+      ],
+      "externalRepos": [],
+      "allLinks": [],
+      "warnings": []
+    }
+    ```
+
+    | Field | Type | Description |
+    |---|---|---|
+    | `source` | `string` | The original input URL or filename |
+    | `sourceType` | `InputType` | Classified input type: `"git_profile"`, `"portfolio"`, `"resume_file"`, etc. |
+    | `ownerProfile` | `ExtractedGitLink \| null` | The candidate's resolved git profile |
+    | `confidence` | `"high" \| "medium" \| "low" \| "none"` | How confidently the owner was identified |
+    | `ownedRepos` | `ExtractedGitLink[]` | Repos where the owner matches the candidate's username |
+    | `contributions` | `ExtractedGitLink[]` | Explicit PR and Issue links found |
+    | `externalRepos` | `ExtractedGitLink[]` | Repos owned by others — referenced but not owned |
+    | `allLinks` | `ExtractedGitLink[]` | Every git link found, unfiltered |
+    | `warnings` | `string[]` | Non-fatal diagnostics from the resolution process |
+
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Next Steps
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Now that you've resolved your first candidate profile, explore the rest of the documentation to go further:
+
+- **[CLI Guide →](/cli/overview)** — batch process a CSV of portfolio links and a directory of resume PDFs simultaneously
+- **[API Reference →](/api/overview)** — full TypeScript signatures for every exported function and type
+- **[Browser Providers →](/providers/overview)** — configure Puppeteer or Browserless for reliable SPA rendering in production

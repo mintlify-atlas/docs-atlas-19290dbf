@@ -1,0 +1,116 @@
+---
+title: "How GitResolve Classifies Inputs Before Processing"
+sidebarTitle: "Input Classification"
+description: "GitResolve automatically classifies every input as a portfolio, git profile, repo URL, resume file, or LinkedIn link before deciding how to process it."
+---
+
+Before GitResolve scrapes a page, parses a PDF, or fetches a remote URL, it classifies the raw input string into one of seven categories. This classification step determines the entire downstream processing path — a `git_profile` URL is resolved directly without scraping, a `portfolio` URL is scraped for links, a `resume_file` is parsed via PDF text extraction, and a `linkedin` URL is flagged but skipped entirely. Getting classification right is what allows GitResolve to handle a mixed array of inputs (portfolio URLs, resume paths, GitHub links) in a single call without any manual routing on your part.
+
+## InputType Reference
+
+Every input resolves to one of these seven values:
+
+| Value | Meaning |
+|---|---|
+| `repo_url` | A GitHub, GitLab, or Bitbucket repository URL (e.g. `github.com/user/repo`) |
+| `git_profile` | A GitHub, GitLab, or Bitbucket profile URL (e.g. `github.com/user`) |
+| `portfolio` | Any other valid URL — personal sites, project pages, hosted portfolios |
+| `resume_file` | A local file path ending in `.pdf`, `.doc`, `.docx`, or `.rtf` |
+| `resume_url` | A remote URL pointing directly to a PDF document |
+| `linkedin` | A LinkedIn URL — recognized and flagged, but not resolved |
+| `unknown` | Anything that cannot be parsed as a URL and does not match a file extension |
+
+## Classification Decision Flow
+
+GitResolve applies rules in strict priority order. The first rule that matches wins — subsequent rules are never evaluated.
+
+<Steps>
+  <Step title="Check for a resume file extension">
+    If the input string ends with `.pdf`, `.doc`, `.docx`, or `.rtf` (case-insensitive), it is classified as `resume_file` immediately — no URL parsing is attempted.
+
+    ```
+    ./resume.pdf       → resume_file
+    /tmp/cv.docx       → resume_file
+    ../docs/cv.RTF     → resume_file
+    ```
+  </Step>
+
+  <Step title="Attempt URL parsing">
+    The input is passed to the WHATWG `URL` constructor. If parsing throws (e.g. bare text with no scheme, a malformed string), the input is classified as `unknown` and no further steps run.
+
+    <Note>
+      Bare git provider URLs without a scheme — such as `github.com/janedoe` — are automatically prefixed with `https://` before parsing. This normalization happens before classification so that shorthand URLs resolve correctly.
+    </Note>
+  </Step>
+
+  <Step title="Check for LinkedIn">
+    If the URL's hostname contains `linkedin.com`, it is classified as `linkedin`. GitResolve does not attempt to resolve LinkedIn URLs to GitHub profiles — see the note below.
+  </Step>
+
+  <Step title="Attempt repo URL parsing">
+    GitResolve calls `parseRepoUrl()` on the normalized URL. This validates that the URL points to a recognized git provider (`github.com`, `gitlab.com`, `bitbucket.org`) and has at least two non-reserved path segments (`owner/repo`). If the parse succeeds, the input is classified as `repo_url`.
+
+    This step also detects pull request and issue URLs — for example, `github.com/user/repo/pull/42` parses as a `repo_url` and the contribution metadata is stored alongside it.
+  </Step>
+
+  <Step title="Check for a known git profile URL">
+    If the URL's hostname is a recognized git provider but `parseRepoUrl()` failed (fewer than two path segments, or a reserved path), GitResolve checks whether at least one non-reserved path segment exists. If so, the input is classified as `git_profile`.
+
+    ```
+    https://github.com/janedoe     → git_profile
+    https://gitlab.com/janedoe     → git_profile
+    https://bitbucket.org/janedoe  → git_profile
+    ```
+  </Step>
+
+  <Step title="Fall back to portfolio">
+    Any valid URL that has not matched an earlier rule is classified as `portfolio`. This covers personal websites, hosted project pages, or any other URL that is not a git provider link.
+  </Step>
+</Steps>
+
+## What GitResolve Does with Each Type
+
+<CardGroup cols={2}>
+  <Card title="git_profile" icon="user">
+    The profile URL is used directly as the known owner. Disambiguation is bypassed and confidence is always `high`. No scraping occurs for the profile page itself — the URL is trusted as-is.
+  </Card>
+  <Card title="repo_url" icon="code-branch">
+    The repository owner is extracted from the URL path. Disambiguation is bypassed; the owner profile is constructed from `owner` at the same git host. Confidence is always `high`.
+  </Card>
+  <Card title="portfolio" icon="globe">
+    The page is fetched and its HTML is scanned for git provider links. All found links are collected into `allLinks` and then passed to the disambiguation algorithm.
+  </Card>
+  <Card title="resume_file" icon="file">
+    The file is parsed with `unpdf` using two methods: plain text extraction (regex-matched for git URLs) and PDF hyperlink annotation extraction. Both result sets are merged and deduplicated before disambiguation.
+  </Card>
+  <Card title="resume_url" icon="link">
+    The remote PDF is fetched and then processed identically to a `resume_file`.
+  </Card>
+  <Card title="linkedin" icon="ban">
+    Recorded in `sourceType` and included in `warnings`, but no resolution is attempted. `ownerProfile` will be `null` and `confidence` will be `none`.
+  </Card>
+  <Card title="unknown" icon="circle-question">
+    Recorded in `sourceType` with `confidence: "none"`. A warning is added and no further processing occurs.
+  </Card>
+</CardGroup>
+
+## LinkedIn: Recognized But Not Resolved
+
+GitResolve intentionally does not attempt to cross-map LinkedIn profile URLs to GitHub usernames. There is no reliable programmatic way to perform that mapping without scraping LinkedIn (which violates their terms of service) or using a paid enrichment API. When a LinkedIn URL is passed, the result will contain `sourceType: "linkedin"`, a `confidence` of `"none"`, and a warning noting that LinkedIn inputs are not resolved. Pass the candidate's portfolio URL or GitHub profile URL instead.
+
+## Code Example
+
+```typescript
+import { classifyInput } from '@clyrisai/gitresolve';
+
+classifyInput('https://github.com/janedoe')        // 'git_profile'
+classifyInput('https://github.com/janedoe/myapp')  // 'repo_url'
+classifyInput('https://janedoe.dev')               // 'portfolio'
+classifyInput('./resume.pdf')                      // 'resume_file'
+classifyInput('https://linkedin.com/in/janedoe')   // 'linkedin'
+classifyInput('not a url at all')                  // 'unknown'
+```
+
+<Tip>
+  You rarely need to call `classifyInput` directly. It runs automatically inside `resolve()` and `resolveAll()`, and the classification is surfaced as the `sourceType` field on every `ResolverResult`.
+</Tip>

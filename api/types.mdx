@@ -1,0 +1,466 @@
+---
+title: "TypeScript Types Reference for @clyrisai/gitresolve"
+sidebarTitle: "Types"
+description: "Complete TypeScript type definitions for GitResolve: InputType, GitProvider, ExtractedGitLink, ResolverResult, AggregatedResult, BrowserProvider, and more."
+---
+
+This page is the canonical reference for every TypeScript type exported by `@clyrisai/gitresolve`. All types are pure interfaces and union types — there are no classes to instantiate unless you are implementing a custom `BrowserProvider`. Import only what you need; tree-shaking eliminates unused type imports at compile time.
+
+---
+
+## Importing types
+
+Use `import type` to ensure types are erased at runtime and do not bloat your bundle:
+
+```typescript
+import type {
+  InputType,
+  GitProvider,
+  GitLinkType,
+  ParsedRepo,
+  ExtractedGitLink,
+  ResolverResult,
+  AggregatedResult,
+  BrowserProvider,
+  BrowserProviderOptions,
+  ProviderName,
+} from '@clyrisai/gitresolve';
+```
+
+The `GIT_HOSTS` constant is a runtime value and must be imported without the `type` modifier:
+
+```typescript
+import { GIT_HOSTS } from '@clyrisai/gitresolve';
+```
+
+---
+
+## InputType
+
+`InputType` classifies what kind of source was passed to the resolver. It is set on `ResolverResult.sourceType` and `AggregatedResult.sourceTypes` so downstream code can decide how to handle each result.
+
+```typescript
+type InputType =
+  | 'repo_url'
+  | 'git_profile'
+  | 'portfolio'
+  | 'resume_file'
+  | 'resume_url'
+  | 'linkedin'
+  | 'unknown';
+```
+
+<ResponseField name="'repo_url'" type="InputType">
+  A GitHub, GitLab, or Bitbucket repository URL (e.g. `https://github.com/owner/repo`). The resolver extracts the owner profile and treats the repo as an owned repository.
+</ResponseField>
+
+<ResponseField name="'git_profile'" type="InputType">
+  A GitHub, GitLab, or Bitbucket profile URL (e.g. `https://github.com/janedoe`). Direct profile links yield the highest confidence scores.
+</ResponseField>
+
+<ResponseField name="'portfolio'" type="InputType">
+  Any website that is not itself a git host URL (e.g. `https://janedoe.dev`). The resolver scrapes the page for embedded git links using the configured `BrowserProvider`.
+</ResponseField>
+
+<ResponseField name="'resume_file'" type="InputType">
+  A local file path pointing to a resume document (`.pdf`, `.doc`, `.docx`, or `.rtf`). The file is read from disk and its text content is scanned for git links.
+</ResponseField>
+
+<ResponseField name="'resume_url'" type="InputType">
+  A remote PDF URL. Set by the CLI after the PDF has been downloaded to a temp file and parsed. Functionally equivalent to `'resume_file'` in resolver output.
+</ResponseField>
+
+<ResponseField name="'linkedin'" type="InputType">
+  A LinkedIn profile URL. GitResolve recognises LinkedIn URLs and records them, but does not scrape or resolve LinkedIn pages. The result will contain no extracted git links from this source.
+</ResponseField>
+
+<ResponseField name="'unknown'" type="InputType">
+  The input could not be classified. This typically means the URL scheme is unrecognised or the string is not a valid URL or file path. Inspect `ResolverResult.warnings` for details.
+</ResponseField>
+
+---
+
+## GitProvider
+
+Identifies the hosting platform of a git link or repository.
+
+```typescript
+type GitProvider = 'github' | 'gitlab' | 'bitbucket';
+```
+
+<ResponseField name="'github'" type="GitProvider">
+  GitHub — `github.com` or `www.github.com`.
+</ResponseField>
+
+<ResponseField name="'gitlab'" type="GitProvider">
+  GitLab — `gitlab.com` or `www.gitlab.com`.
+</ResponseField>
+
+<ResponseField name="'bitbucket'" type="GitProvider">
+  Bitbucket — `bitbucket.org` or `www.bitbucket.org`.
+</ResponseField>
+
+---
+
+## GitLinkType
+
+Classifies the kind of page a git URL points to within its host platform.
+
+```typescript
+type GitLinkType = 'profile' | 'repo' | 'gist' | 'pull_request' | 'issue' | 'other';
+```
+
+<ResponseField name="'profile'" type="GitLinkType">
+  A user or organization profile page (e.g. `https://github.com/janedoe`).
+</ResponseField>
+
+<ResponseField name="'repo'" type="GitLinkType">
+  A repository root (e.g. `https://github.com/janedoe/my-project`).
+</ResponseField>
+
+<ResponseField name="'gist'" type="GitLinkType">
+  A GitHub Gist (e.g. `https://gist.github.com/janedoe/abc123`).
+</ResponseField>
+
+<ResponseField name="'pull_request'" type="GitLinkType">
+  A pull request URL. When present, `ExtractedGitLink.number` holds the PR number.
+</ResponseField>
+
+<ResponseField name="'issue'" type="GitLinkType">
+  An issue URL. When present, `ExtractedGitLink.number` holds the issue number.
+</ResponseField>
+
+<ResponseField name="'other'" type="GitLinkType">
+  Any other URL on a recognised git host that does not match the patterns above (e.g. a wiki page, a release asset, or a raw file URL).
+</ResponseField>
+
+---
+
+## ParsedRepo
+
+A low-level representation of a parsed repository URL, produced by the URL parsing layer before link classification. Contains every component of the URL path in decomposed form.
+
+```typescript
+interface ParsedRepo {
+  provider: GitProvider;
+  host: string;
+  owner: string;
+  repo: string;
+  fullPath: string;
+  normalized: string;
+  contribution?: { type: 'pull_request' | 'issue'; number: string };
+}
+```
+
+<ResponseField name="provider" type="GitProvider" required>
+  The hosting platform inferred from the URL's hostname.
+</ResponseField>
+
+<ResponseField name="host" type="string" required>
+  The raw hostname from the URL (e.g. `'github.com'`, `'www.gitlab.com'`).
+</ResponseField>
+
+<ResponseField name="owner" type="string" required>
+  The repository owner's username or organization name extracted from the URL path.
+</ResponseField>
+
+<ResponseField name="repo" type="string" required>
+  The repository name extracted from the URL path.
+</ResponseField>
+
+<ResponseField name="fullPath" type="string" required>
+  The full `owner/repo` path segment as it appears in the URL.
+</ResponseField>
+
+<ResponseField name="normalized" type="string" required>
+  A canonical HTTPS URL for the repository, stripped of trailing slashes and query parameters (e.g. `'https://github.com/janedoe/my-project'`).
+</ResponseField>
+
+<ResponseField name="contribution" type="{ type: 'pull_request' | 'issue'; number: string }" optional>
+  Present when the URL points to a pull request or issue within the repository. `type` distinguishes between the two; `number` is the numeric ID as a string.
+
+  <Expandable title="contribution fields">
+    <ResponseField name="type" type="'pull_request' | 'issue'" required>
+      Whether the link is a pull request or an issue.
+    </ResponseField>
+    <ResponseField name="number" type="string" required>
+      The PR or issue number as a string (e.g. `'42'`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## ExtractedGitLink
+
+The primary unit of resolver output. Represents a single git link found in a source, fully parsed and classified.
+
+```typescript
+interface ExtractedGitLink {
+  url: string;
+  provider: GitProvider;
+  type: GitLinkType;
+  username: string;
+  repo?: string;
+  number?: string;
+}
+```
+
+<ResponseField name="url" type="string" required>
+  The normalized, canonical HTTPS URL for the link (trailing slashes removed, query parameters stripped).
+</ResponseField>
+
+<ResponseField name="provider" type="GitProvider" required>
+  The hosting platform for this link.
+</ResponseField>
+
+<ResponseField name="type" type="GitLinkType" required>
+  The kind of page this URL points to on its platform.
+</ResponseField>
+
+<ResponseField name="username" type="string" required>
+  The profile owner or repository owner's username as extracted from the URL. For a repository URL this is the repo owner, not necessarily the candidate.
+</ResponseField>
+
+<ResponseField name="repo" type="string" optional>
+  The repository name. Present when `type` is `'repo'`, `'pull_request'`, or `'issue'`; absent for `'profile'` and `'gist'` links.
+</ResponseField>
+
+<ResponseField name="number" type="string" optional>
+  The pull request or issue number as a string. Present only when `type` is `'pull_request'` or `'issue'`.
+</ResponseField>
+
+---
+
+## ResolverResult
+
+The complete output for a single resolved source (one URL, file path, or input string). Contains the candidate's inferred profile, confidence score, and all extracted links partitioned into meaningful categories.
+
+```typescript
+interface ResolverResult {
+  source: string;
+  sourceType: InputType;
+  ownerProfile: ExtractedGitLink | null;
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  ownedRepos: ExtractedGitLink[];
+  contributions: ExtractedGitLink[];
+  externalRepos: ExtractedGitLink[];
+  allLinks: ExtractedGitLink[];
+  warnings: string[];
+  error?: string;
+}
+```
+
+<ResponseField name="source" type="string" required>
+  The original input string passed to the resolver — a URL, a local file path, or a raw string. Used to trace a result back to its origin.
+</ResponseField>
+
+<ResponseField name="sourceType" type="InputType" required>
+  The classified type of `source`. Set during input parsing before any network activity occurs.
+</ResponseField>
+
+<ResponseField name="ownerProfile" type="ExtractedGitLink | null" required>
+  The best-guess `ExtractedGitLink` representing the candidate's own git profile, or `null` if no profile could be identified. A non-null value does not guarantee the profile belongs to this candidate — see `confidence`.
+</ResponseField>
+
+<ResponseField name="confidence" type="'high' | 'medium' | 'low' | 'none'" required>
+  How certain the resolver is that `ownerProfile` belongs to the candidate:
+
+  - `'high'` — the source was a direct git profile URL or a repository URL owned by the candidate.
+  - `'medium'` — the profile was inferred from multiple corroborating links on a portfolio or resume.
+  - `'low'` — the profile is a best guess from limited or ambiguous signals.
+  - `'none'` — no profile could be identified.
+</ResponseField>
+
+<ResponseField name="ownedRepos" type="ExtractedGitLink[]" required>
+  Repositories where the extracted `username` matches the candidate's resolved username from `ownerProfile`. These are the repositories most likely to belong to the candidate.
+</ResponseField>
+
+<ResponseField name="contributions" type="ExtractedGitLink[]" required>
+  Explicit pull request and issue links found in the source. These signal active open-source contribution activity regardless of repository ownership.
+</ResponseField>
+
+<ResponseField name="externalRepos" type="ExtractedGitLink[]" required>
+  Repository links owned by a username that does not match the candidate's resolved username. These indicate referenced libraries, employer codebases, or other external projects mentioned in the source.
+</ResponseField>
+
+<ResponseField name="allLinks" type="ExtractedGitLink[]" required>
+  Every git link extracted from the source, unfiltered and unsorted. This is the superset of `ownedRepos`, `contributions`, and `externalRepos`, plus any links that did not fit a more specific category.
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]" required>
+  Non-fatal diagnostic messages accumulated during resolution (e.g. ambiguous profile detection, slow page load, parser heuristic fallbacks). Always an array; empty when resolution was clean.
+</ResponseField>
+
+<ResponseField name="error" type="string" optional>
+  Set when a fatal error occurred during resolution (e.g. network failure, unparseable PDF). When present, the other output fields may be partially populated or empty.
+</ResponseField>
+
+---
+
+## AggregatedResult
+
+Combines multiple `ResolverResult` objects — from different sources that were determined to belong to the same candidate — into a single de-duplicated profile. Used when a candidate provides both a portfolio URL and a resume file, for example.
+
+```typescript
+interface AggregatedResult {
+  candidateUsername: string | null;
+  sources: string[];
+  sourceTypes: InputType[];
+  ownerProfile: ExtractedGitLink | null;
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  ownedRepos: ExtractedGitLink[];
+  contributions: ExtractedGitLink[];
+  externalRepos: ExtractedGitLink[];
+  allLinks: ExtractedGitLink[];
+  warnings: string[];
+}
+```
+
+<ResponseField name="candidateUsername" type="string | null" required>
+  The resolved git username for the candidate, or `null` if the aggregation could not determine a single username. A `null` value means the sources were either ambiguous (multiple different usernames found) or contained no profile links at all.
+</ResponseField>
+
+<ResponseField name="sources" type="string[]" required>
+  All original input strings that were aggregated into this result, in the order they were processed (e.g. `['https://janedoe.dev', './resumes/janedoe.pdf']`).
+</ResponseField>
+
+<ResponseField name="sourceTypes" type="InputType[]" required>
+  The `InputType` classification for each entry in `sources`, at the same index. `sources[i]` has type `sourceTypes[i]`.
+</ResponseField>
+
+<ResponseField name="ownerProfile" type="ExtractedGitLink | null" required>
+  The highest-confidence profile link found across all aggregated sources, or `null` if none was found.
+</ResponseField>
+
+<ResponseField name="confidence" type="'high' | 'medium' | 'low' | 'none'" required>
+  The highest confidence level observed across all aggregated `ResolverResult` entries. Aggregating multiple sources never lowers confidence below the best individual result.
+</ResponseField>
+
+<ResponseField name="ownedRepos" type="ExtractedGitLink[]" required>
+  De-duplicated union of `ownedRepos` from all aggregated results.
+</ResponseField>
+
+<ResponseField name="contributions" type="ExtractedGitLink[]" required>
+  De-duplicated union of `contributions` from all aggregated results.
+</ResponseField>
+
+<ResponseField name="externalRepos" type="ExtractedGitLink[]" required>
+  De-duplicated union of `externalRepos` from all aggregated results.
+</ResponseField>
+
+<ResponseField name="allLinks" type="ExtractedGitLink[]" required>
+  De-duplicated union of every `ExtractedGitLink` found across all aggregated sources.
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]" required>
+  Merged warnings from all aggregated `ResolverResult` entries. May contain messages from multiple sources.
+</ResponseField>
+
+---
+
+## BrowserProvider
+
+The interface that all browser engine implementations must satisfy. See [`createProvider`](/api/create-provider) for auto-detection and the [Custom provider](/api/create-provider#custom-provider-implementation) section for how to implement your own.
+
+```typescript
+interface BrowserProvider {
+  readonly name: string;
+  getPageContent(url: string, options?: BrowserProviderOptions): Promise<string>;
+  isAvailable(): Promise<boolean>;
+  cleanup(): Promise<void>;
+}
+```
+
+<ResponseField name="name" type="string" required>
+  Human-readable provider identifier. Built-in values: `'fetch'`, `'puppeteer'`, `'browserless'`.
+</ResponseField>
+
+<ResponseField name="getPageContent(url, options?)" type="Promise<string>" required>
+  Fetches the fully rendered HTML of `url`. Throws on network errors, non-2xx responses, or timeouts.
+</ResponseField>
+
+<ResponseField name="isAvailable()" type="Promise<boolean>" required>
+  Returns `true` if the provider can be used in the current environment. Called by `createProvider` during the fallback chain.
+</ResponseField>
+
+<ResponseField name="cleanup()" type="Promise<void>" required>
+  Releases all resources held by the provider instance. Always call this in a `finally` block.
+</ResponseField>
+
+---
+
+## BrowserProviderOptions
+
+Optional per-request settings passed to `BrowserProvider.getPageContent`.
+
+```typescript
+interface BrowserProviderOptions {
+  timeout?: number;
+  waitUntil?: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2';
+}
+```
+
+<ResponseField name="timeout" type="number" optional>
+  Navigation timeout in milliseconds. Defaults to `15000` for the `fetch` provider and `30000` for `puppeteer` and `browserless`.
+</ResponseField>
+
+<ResponseField name="waitUntil" type="'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'" optional>
+  Determines when the headless browser considers navigation complete. Ignored by the `fetch` provider. Defaults to `'networkidle2'`.
+</ResponseField>
+
+---
+
+## ProviderName
+
+The set of built-in provider names accepted by `createProvider` and the `BROWSER_PROVIDER` environment variable.
+
+```typescript
+type ProviderName = 'puppeteer' | 'browserless' | 'fetch';
+```
+
+<ResponseField name="'puppeteer'" type="ProviderName">
+  Full headless Chrome via the `puppeteer` optional peer dependency. Renders JavaScript. Requires `puppeteer` to be installed.
+</ResponseField>
+
+<ResponseField name="'browserless'" type="ProviderName">
+  Remote headless browser via the Browserless REST API. Renders JavaScript. Requires a running Browserless instance, configured via `BROWSERLESS_URL` (defaults to `http://localhost:3000`).
+</ResponseField>
+
+<ResponseField name="'fetch'" type="ProviderName">
+  Native `fetch` — no external dependencies, always available on Node 18+. Does not execute JavaScript; works for static or server-rendered pages.
+</ResponseField>
+
+---
+
+## GIT_HOSTS constant
+
+A lookup table mapping recognised hostnames (with and without the `www.` prefix) to their `GitProvider` value. Use it to check whether a hostname belongs to a supported git platform or to normalise hostnames before comparison.
+
+```typescript
+import { GIT_HOSTS } from '@clyrisai/gitresolve';
+
+GIT_HOSTS['github.com']        // 'github'
+GIT_HOSTS['www.github.com']    // 'github'
+GIT_HOSTS['gitlab.com']        // 'gitlab'
+GIT_HOSTS['www.gitlab.com']    // 'gitlab'
+GIT_HOSTS['bitbucket.org']     // 'bitbucket'
+GIT_HOSTS['www.bitbucket.org'] // 'bitbucket'
+```
+
+The full constant definition:
+
+```typescript
+const GIT_HOSTS: Record<string, GitProvider> = {
+  'github.com': 'github',
+  'www.github.com': 'github',
+  'gitlab.com': 'gitlab',
+  'www.gitlab.com': 'gitlab',
+  'bitbucket.org': 'bitbucket',
+  'www.bitbucket.org': 'bitbucket',
+};
+```
+
+<Tip>
+  Prefer `GIT_HOSTS[hostname]` over hard-coding string comparisons. If GitResolve adds support for additional git hosts in future versions, your code will benefit automatically.
+</Tip>

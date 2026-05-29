@@ -1,0 +1,115 @@
+---
+title: "PuppeteerProvider: Full Headless Browser Rendering"
+sidebarTitle: "Puppeteer"
+description: "PuppeteerProvider runs headless Chromium to fully render JavaScript-heavy portfolio sites and single-page applications before extracting git profile links."
+---
+
+`PuppeteerProvider` launches a real headless Chromium browser via the [Puppeteer](https://pptr.dev) library to fetch page content. Unlike `FetchProvider`, it executes all JavaScript on the page before returning HTML — making it the right choice when a candidate's portfolio is a React, Vue, Next.js, or similar single-page application that renders content entirely in the browser. The provider keeps a single browser instance alive across multiple calls and creates a fresh page per URL, so repeated lookups within the same session are efficient.
+
+## Installation
+
+Puppeteer is an optional peer dependency. Install it explicitly in your project:
+
+```bash
+npm install puppeteer
+```
+
+<Note>
+  If Puppeteer is not installed, `createProvider('puppeteer')` will throw an error. When using auto-detection via `createProvider()` with no argument, GitResolve will skip Puppeteer and try the next provider in the chain — no crash, no configuration needed.
+</Note>
+
+## Usage
+
+### Direct instantiation
+
+```typescript
+import { PuppeteerProvider } from '@clyrisai/gitresolve';
+
+const provider = new PuppeteerProvider();
+try {
+  const result = await scrapePortfolio('https://janedoe.dev', provider);
+  console.log(result.ownerProfile);
+} finally {
+  await provider.cleanup(); // important: closes the browser
+}
+```
+
+### Via factory
+
+```typescript
+import { createProvider } from '@clyrisai/gitresolve';
+
+const provider = await createProvider('puppeteer');
+```
+
+### Via CLI
+
+```bash
+gitresolve --provider puppeteer https://janedoe.dev
+```
+
+<Tip>
+  Set the `BROWSER_PROVIDER=puppeteer` environment variable to always use Puppeteer without passing `--provider` on every CLI invocation or `'puppeteer'` to every `createProvider` call.
+
+  ```bash
+  export BROWSER_PROVIDER=puppeteer
+  gitresolve https://janedoe.dev
+  ```
+</Tip>
+
+## How It Works
+
+<Steps>
+  <Step title="Lazy browser launch">
+    On the first call to `getPageContent`, Puppeteer is dynamically imported and a headless Chromium browser is launched with `{ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }`. The `--no-sandbox` flags are required in most CI and containerised environments where running a sandboxed browser process is not permitted.
+  </Step>
+  <Step title="Page per URL">
+    A new browser page (tab) is opened for each `getPageContent` call. The page navigates to the target URL, waits for the configured `waitUntil` condition, then returns the fully rendered HTML. The page is closed immediately after — the browser instance itself stays open.
+  </Step>
+  <Step title="Cleanup">
+    Call `provider.cleanup()` when you are done. This closes the shared browser process and frees all associated memory. Failing to call `cleanup()` leaves a Chromium process running in the background.
+  </Step>
+</Steps>
+
+## Options
+
+Pass a `BrowserProviderOptions` object as the second argument to `getPageContent` to override defaults:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `timeout` | `number` | `30000` | Navigation timeout in milliseconds. Puppeteer throws if the page does not reach the `waitUntil` condition within this window. |
+| `waitUntil` | `'load' \| 'domcontentloaded' \| 'networkidle0' \| 'networkidle2'` | `'networkidle2'` | When to consider navigation complete. `networkidle2` waits until there are no more than 2 in-flight network requests for at least 500 ms — ideal for SPAs that batch-load API data on mount. |
+
+```typescript
+const html = await provider.getPageContent('https://janedoe.dev', {
+  timeout: 60000,
+  waitUntil: 'networkidle0',
+});
+```
+
+## Launch Arguments
+
+The browser is always started with these Chromium flags:
+
+```
+--no-sandbox
+--disable-setuid-sandbox
+```
+
+These flags are required in Docker containers, GitHub Actions, and other Linux CI environments where the kernel does not allow a sandboxed child process. They are safe for the scraping use case where you control which URLs are visited.
+
+<Warning>
+  Always call `provider.cleanup()` after you are done — even if an error is thrown. Wrap your usage in a `try/finally` block to guarantee the browser process is closed:
+
+  ```typescript
+  const provider = new PuppeteerProvider();
+  try {
+    const html = await provider.getPageContent('https://janedoe.dev');
+    // ...
+  } finally {
+    await provider.cleanup();
+  }
+  ```
+
+  Skipping `cleanup()` leaves a headless Chromium process running until your Node.js process exits, which can exhaust file descriptors and memory in long-running services.
+</Warning>

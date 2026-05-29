@@ -1,0 +1,113 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "GitResolve",
+  "projectDescription": "An npm library and CLI tool that resolves candidate portfolios, resume PDFs, and URLs into structured GitHub, GitLab, and Bitbucket profiles and repositories.",
+  "theme": "luma",
+  "primaryColor": "#ffffff",
+  "lightColor": "#3c4cfc",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "CLI Guide",
+            "pages": [
+              "cli/overview",
+              "cli/single-url",
+              "cli/batch-processing",
+              "cli/output-options"
+            ]
+          },
+          {
+            "group": "Browser Providers",
+            "pages": [
+              "providers/overview",
+              "providers/fetch",
+              "providers/puppeteer",
+              "providers/browserless"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/input-classification",
+              "concepts/disambiguation",
+              "concepts/result-structure"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Programmatic API",
+            "pages": [
+              "api/overview",
+              "api/classify-input",
+              "api/scrape-portfolio",
+              "api/parse-resume",
+              "api/resolve-owner",
+              "api/create-provider"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Classifies URLs into portfolio, git_profile, repo_url, resume_file, resume_url, and linkedin types",
+    "Scrapes portfolio sites and git profile pages using fetch, Puppeteer, or Browserless",
+    "Parses PDF resumes via both text extraction and hyperlink annotation extraction",
+    "Disambiguates candidate ownership from multiple found git profiles and repos using cross-referencing",
+    "Categorizes discovered links into ownedRepos, contributions (PRs/Issues), and externalRepos",
+    "Supports GitHub, GitLab, and Bitbucket across all features",
+    "Aggregates results from multiple sources (portfolio + resume) into a unified candidate profile",
+    "Batch processing from CSV portfolio lists and directories of resume PDFs",
+    "Fully typed public TypeScript API exported as an npm package",
+    "Three browser providers (fetch / Puppeteer / Browserless) with automatic fallback detection"
+  ],
+  "publicApiSurface": [
+    "classifyInput(input: string): InputType",
+    "parseRepoUrl(repoUrl: string): { valid: boolean; data?: ParsedRepo; error?: string }",
+    "parseGitLink(rawUrl: string): ExtractedGitLink | null",
+    "extractGitUrlsFromText(text: string): string[]",
+    "isGitProviderUrl(link: string): boolean",
+    "scrapePortfolio(url: string, provider: BrowserProvider, knownOwnerProfile?: ExtractedGitLink): Promise<ResolverResult>",
+    "extractLinksFromHtml(html: string, baseUrl: string): string[]",
+    "parseResume(filePath: string): Promise<ResolverResult>",
+    "resolveOwnerAndCategorize(links: ExtractedGitLink[], sourceContext?: string, knownOwnerProfile?: ExtractedGitLink): OwnerResolution",
+    "dedupeProfilesByUsername(profiles: ExtractedGitLink[]): ExtractedGitLink[]",
+    "createProvider(preferred?: ProviderName): Promise<BrowserProvider>",
+    "FetchProvider",
+    "PuppeteerProvider",
+    "BrowserlessProvider",
+    "GIT_HOSTS: Record<string, GitProvider>",
+    "InputType (type alias)",
+    "GitProvider (type alias)",
+    "ParsedRepo (interface)",
+    "GitLinkType (type alias)",
+    "ExtractedGitLink (interface)",
+    "ResolverResult (interface)",
+    "AggregatedResult (interface)",
+    "BrowserProvider (interface)",
+    "BrowserProviderOptions (interface)",
+    "ProviderName (type alias)"
+  ]
+}

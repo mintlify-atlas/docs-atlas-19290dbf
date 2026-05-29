@@ -1,20 +1,71 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "GitResolve: Resolve Candidate Profiles from Portfolios & Resumes"
+sidebarTitle: "Home"
+description: "GitResolve turns messy candidate URLs, portfolio sites, and resume PDFs into structured GitHub, GitLab, and Bitbucket profiles and repositories."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+GitResolve is an npm library and CLI tool built for recruiters and ATS pipelines that need to extract structured developer profiles from raw candidate submissions. Feed it a portfolio URL, a GitHub link, or a resume PDF — it returns a clean, typed result with the candidate's profile, owned repositories, contributions, and external references.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Resolve your first candidate profile in under two minutes with a single command or API call.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install via npm, pnpm, or yarn — or run instantly with npx, no install required.
+  </Card>
+  <Card title="CLI Guide" icon="terminal" href="/cli/overview">
+    Process single URLs, batch CSVs of portfolios, and directories of resume PDFs from the command line.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Integrate GitResolve directly into your Node.js or Bun backend with a fully typed TypeScript API.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## How GitResolve works
+
+GitResolve follows a five-stage pipeline to turn raw candidate inputs into structured profiles:
+
+<Steps>
+  <Step title="Classify the input">
+    GitResolve identifies whether the input is a portfolio site, git profile, repository URL, resume PDF, resume URL, or LinkedIn link using [`classifyInput`](/api/classify-input).
+  </Step>
+  <Step title="Fetch page content">
+    For URLs, GitResolve fetches rendered HTML using one of three [browser providers](/providers/overview): native `fetch` (fastest, no dependencies), Puppeteer (full JS rendering), or Browserless (Docker-based, great for CI/CD).
+  </Step>
+  <Step title="Extract git links">
+    All GitHub, GitLab, and Bitbucket URLs are extracted from page HTML — both from `href` attributes and raw text. For resume PDFs, both text content and embedded hyperlink annotations are parsed.
+  </Step>
+  <Step title="Disambiguate ownership">
+    The [disambiguation engine](/concepts/disambiguation) cross-references profile links with repo owners to determine which GitHub account belongs to the candidate — with a `high`, `medium`, `low`, or `none` confidence score.
+  </Step>
+  <Step title="Return a structured result">
+    Every resolved candidate gets a [`ResolverResult`](/api/types) containing their profile, owned repos, contributions (PRs and issues), and external references. Multiple sources for the same candidate are merged into an [`AggregatedResult`](/api/types).
+  </Step>
+</Steps>
+
+## Supported input types
+
+| Input | Example | What GitResolve does |
+|---|---|---|
+| **Portfolio site** | `https://janedoe.dev` | Scrapes page for git links |
+| **GitHub profile** | `https://github.com/janedoe` | Scrapes profile, discovers repos |
+| **GitLab profile** | `https://gitlab.com/janedoe` | Scrapes profile, handles `/users/` routes |
+| **Bitbucket profile** | `https://bitbucket.org/janedoe` | Scrapes profile page |
+| **Repository URL** | `https://github.com/user/repo` | Scrapes repo page, resolves owner |
+| **PR / Issue URL** | `https://github.com/user/repo/pull/42` | Extracts as a contribution |
+| **Resume PDF** | `./resume.pdf` or HTTPS URL | Extracts text + hyperlink annotations |
+
+<CardGroup cols={2}>
+  <Card title="Input Classification" icon="filter" href="/concepts/input-classification">
+    Learn how GitResolve determines the type of each input and what happens next.
+  </Card>
+  <Card title="Disambiguation" icon="user-check" href="/concepts/disambiguation">
+    Understand the cross-referencing algorithm that identifies the candidate's actual profile.
+  </Card>
+  <Card title="Result Structure" icon="brackets-curly" href="/concepts/result-structure">
+    Explore every field in `ResolverResult` and `AggregatedResult`.
+  </Card>
+  <Card title="Browser Providers" icon="globe" href="/providers/overview">
+    Choose between fetch, Puppeteer, and Browserless to match your environment.
+  </Card>
+</CardGroup>

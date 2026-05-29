@@ -1,0 +1,284 @@
+---
+title: "resolveOwnerAndCategorize and dedupeProfilesByUsername"
+sidebarTitle: "Disambiguator"
+description: "resolveOwnerAndCategorize determines the candidate's git profile from a list of ExtractedGitLinks and categorizes repos as owned, contributed, or external."
+---
+
+Disambiguation is the step that turns a flat list of git URLs into a structured answer: who is the candidate, and which repos do they actually own? `resolveOwnerAndCategorize` implements a cross-referencing algorithm that considers profile links, repo ownership patterns, and an optional known-owner hint to produce a typed `OwnerResolution` with an explicit confidence level. Both `scrapePortfolio` and `parseResume` call this function internally — but it is also exported for use in custom extraction pipelines.
+
+## resolveOwnerAndCategorize
+
+Given a list of `ExtractedGitLink` objects, this function determines the most likely owner profile and sorts every repo link into one of three buckets: owned, contributed, or external. It never throws.
+
+```typescript
+export function resolveOwnerAndCategorize(
+  links: ExtractedGitLink[],
+  sourceContext?: string,
+  knownOwnerProfile?: ExtractedGitLink
+): OwnerResolution
+```
+
+### Parameters
+
+<ParamField path="links" type="ExtractedGitLink[]" required>
+  All git links extracted from a page or document — the full `allLinks` array from a scrape or parse pass. The function internally separates these into profiles (`type === 'profile'`), repos (`type === 'repo'`), and contributions (`type === 'pull_request' | 'issue'`). Gists and other link types are present in `allLinks` but do not affect owner resolution.
+</ParamField>
+
+<ParamField path="sourceContext" type="string">
+  An optional context hint describing where the links came from. Currently passed through to warning messages. Conventionally `'portfolio'` (set by `scrapePortfolio`) or `'resume'` (set by `parseResume`). Has no effect on the disambiguation algorithm itself.
+</ParamField>
+
+<ParamField path="knownOwnerProfile" type="ExtractedGitLink">
+  An optional pre-resolved owner. When provided, the entire disambiguation algorithm is bypassed — `ownerProfile` is set to this value, `confidence` is set to `'high'`, and repo categorization runs immediately against the known username. A warning is still appended: `"Owner strictly determined by profile URL input: <username>"`.
+</ParamField>
+
+### Return Type: OwnerResolution
+
+`OwnerResolution` is the internal return type of this function. It is not exported directly from the package as a named type, but its shape is reflected in `ResolverResult` — `scrapePortfolio` and `parseResume` spread its fields onto their results.
+
+<ResponseField name="ownerProfile" type="ExtractedGitLink | null">
+  The resolved candidate profile. In the no-profile-link case (Case 3 below), a synthetic `ExtractedGitLink` with `type: 'profile'` is constructed from the inferred username and their git provider's hostname.
+</ResponseField>
+
+<ResponseField name="confidence" type='"high" | "medium" | "low" | "none"'>
+  The algorithm's certainty about the resolved owner. See the [Disambiguation Cases](#disambiguation-cases) section below for exactly when each level is assigned.
+</ResponseField>
+
+<ResponseField name="ownedRepos" type="ExtractedGitLink[]">
+  Repo links (deduplicated by URL) where `link.username.toLowerCase() === ownerUsername.toLowerCase()`.
+</ResponseField>
+
+<ResponseField name="contributions" type="ExtractedGitLink[]">
+  Links with `type === 'pull_request'` or `type === 'issue'` that were not already counted as repos. These represent explicit contribution signals.
+</ResponseField>
+
+<ResponseField name="externalRepos" type="ExtractedGitLink[]">
+  Deduplicated repo links where the username does not match the owner. These are third-party libraries, framework references, or collaborator projects.
+</ResponseField>
+
+<ResponseField name="warnings" type="string[]">
+  Human-readable diagnostic messages describing which disambiguation path was taken, any ambiguities encountered, and what choices were made. Useful for auditing resolution quality.
+</ResponseField>
+
+### Disambiguation Cases
+
+The algorithm evaluates links in order and takes the first path that applies. All username comparisons are case-insensitive throughout.
+
+<Expandable title="Case 0 — No links at all → confidence: none">
+
+When `links` is empty, the function returns immediately with `ownerProfile: null`, `confidence: 'none'`, and a single warning: `"No git links found"`. No repo categorization is attempted.
+
+</Expandable>
+
+<Expandable title="Case: knownOwnerProfile provided → confidence: high">
+
+If `knownOwnerProfile` is passed, it is used directly as the owner without any profile or repo inspection. Confidence is always `'high'`. This is the escape hatch for situations where the URL structure is itself the identity signal — for example, `https://github.com/janedoe` is unambiguously a GitHub profile, so there is no need to cross-reference.
+
+</Expandable>
+
+<Expandable title="Case 1 — Single unique profile username → confidence: high">
+
+If, after deduplication by username (case-insensitive), exactly one profile link remains, that profile is the owner. Confidence is `'high'`.
+
+This is the most common outcome for clean portfolio sites — a single `github.com/username` link beside several repo links.
+
+</Expandable>
+
+<Expandable title="Case 2 — Multiple distinct profile usernames → confidence: high / medium / low">
+
+When two or more unique profile usernames are found, the algorithm cross-references each against the repo links:
+
+- **Score each profile**: count how many repo links share that profile's username.
+- **Clear winner** (top score > second score, and top score > 0) → `'high'`. A warning lists all profiles and their repo counts.
+- **Tied scores** (top score === second score, both > 0) → `'medium'`. A warning flags the tie and names the chosen profile.
+- **No repos match any profile** → `'low'`. The first profile is chosen. Warning: `"None of the profile links match any repo owner — picking first profile"`.
+- **No repos at all** → `'low'`. The first profile is chosen. Warning: `"Multiple profiles found but no repos to cross-reference — picking first"`.
+
+A `"Multiple profile links found: ..."` warning is always added when this case is entered.
+
+</Expandable>
+
+<Expandable title="Case 3 — No profile links, only repos → confidence: medium / low">
+
+When no profile links exist, the algorithm infers ownership from the repo usernames:
+
+- **All repos belong to one user** → synthetic profile constructed, `'medium'`. Warning: `"No profile link found — all repos belong to same user, inferred as owner"`.
+- **One username has more repos than the rest** → `'medium'`. Warning includes the full sorted breakdown.
+- **Tied repo counts** → `'low'`. Warning: `"No profile link found — tied repo ownership: ..."`.
+
+The synthetic profile's URL is constructed as `https://{host}/{username}` where `host` is `github.com`, `gitlab.com`, or `bitbucket.org` based on the inferred provider.
+
+</Expandable>
+
+### Repo Categorization Rules
+
+After the owner is resolved, all repo links are walked once and sorted into buckets:
+
+- **`ownedRepos`** — `link.type === 'repo'` and `link.username.toLowerCase() === ownerUsername.toLowerCase()`
+- **`externalRepos`** — `link.type === 'repo'` and username does not match the owner
+- **`contributions`** — `link.type === 'pull_request'` or `link.type === 'issue'`
+
+Both `ownedRepos` and `externalRepos` are deduplicated by URL (lowercased) before being returned. Each URL is counted only once.
+
+### When to Call Directly
+
+`resolveOwnerAndCategorize` is called automatically by both `scrapePortfolio` and `parseResume`. You only need to call it directly when you have built your own extraction pipeline and already hold a list of `ExtractedGitLink` objects — for example, from a custom scraper, a database query, or a hand-authored list of URLs passed through `parseGitLink`.
+
+### Usage Example
+
+```typescript
+import { resolveOwnerAndCategorize, parseGitLink } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+const rawUrls = [
+  'https://github.com/janedoe',
+  'https://github.com/janedoe/portfolio',
+  'https://github.com/facebook/react',
+];
+
+const links = rawUrls
+  .map(url => parseGitLink(url))
+  .filter(Boolean) as ExtractedGitLink[];
+
+const resolution = resolveOwnerAndCategorize(links);
+
+console.log(resolution.ownerProfile?.username);  // 'janedoe'
+console.log(resolution.confidence);              // 'high'
+console.log(resolution.ownedRepos.length);       // 1  (janedoe/portfolio)
+console.log(resolution.externalRepos.length);    // 1  (facebook/react)
+console.log(resolution.warnings);
+// ['Used janedoe provider for page content'] — no, actually:
+// ['Owner strictly determined by...'] or confidence path warnings
+```
+
+<CodeGroup>
+
+```typescript Multiple profiles — cross-reference
+import { resolveOwnerAndCategorize, parseGitLink } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+// Portfolio that links to both the candidate and a collaborator
+const rawUrls = [
+  'https://github.com/alice',
+  'https://github.com/bob',
+  'https://github.com/alice/project-a',
+  'https://github.com/alice/project-b',
+  'https://github.com/bob/shared-lib',
+];
+
+const links = rawUrls
+  .map(url => parseGitLink(url))
+  .filter(Boolean) as ExtractedGitLink[];
+
+const resolution = resolveOwnerAndCategorize(links);
+
+console.log(resolution.ownerProfile?.username);  // 'alice'
+console.log(resolution.confidence);              // 'high' (alice has 2 repos, bob has 1)
+console.log(resolution.ownedRepos.length);       // 2
+console.log(resolution.externalRepos.length);    // 1
+// warnings include "Multiple profile links found: alice, bob"
+// and "Owner determined by repo cross-reference: alice(2 repos), bob(1 repos)"
+```
+
+```typescript No profile links — inferred from repos
+import { resolveOwnerAndCategorize, parseGitLink } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+// Resume that only mentions repo URLs, no profile page
+const rawUrls = [
+  'https://github.com/janedoe/api-server',
+  'https://github.com/janedoe/cli-tool',
+  'https://github.com/expressjs/express',
+];
+
+const links = rawUrls
+  .map(url => parseGitLink(url))
+  .filter(Boolean) as ExtractedGitLink[];
+
+const resolution = resolveOwnerAndCategorize(links, 'resume');
+
+console.log(resolution.ownerProfile?.username);  // 'janedoe'
+console.log(resolution.ownerProfile?.type);      // 'profile' (synthetic)
+console.log(resolution.ownerProfile?.url);       // 'https://github.com/janedoe'
+console.log(resolution.confidence);              // 'medium'
+console.log(resolution.ownedRepos.length);       // 2
+console.log(resolution.externalRepos.length);    // 1 (expressjs/express)
+```
+
+```typescript knownOwnerProfile bypass
+import { resolveOwnerAndCategorize, parseGitLink } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+const knownOwner: ExtractedGitLink = {
+  url: 'https://github.com/janedoe',
+  provider: 'github',
+  type: 'profile',
+  username: 'janedoe',
+};
+
+const links = [
+  parseGitLink('https://github.com/janedoe/portfolio'),
+  parseGitLink('https://github.com/facebook/react'),
+].filter(Boolean) as ExtractedGitLink[];
+
+const resolution = resolveOwnerAndCategorize(links, undefined, knownOwner);
+
+console.log(resolution.confidence);  // 'high' — always, regardless of link count
+console.log(resolution.warnings[0]); // 'Owner strictly determined by profile URL input: janedoe'
+```
+
+</CodeGroup>
+
+---
+
+## dedupeProfilesByUsername
+
+`dedupeProfilesByUsername` removes duplicate profile links that share the same username, keeping the first occurrence of each. Username comparison is case-insensitive.
+
+```typescript
+export function dedupeProfilesByUsername(
+  profiles: ExtractedGitLink[]
+): ExtractedGitLink[]
+```
+
+### Parameters
+
+<ParamField path="profiles" type="ExtractedGitLink[]" required>
+  An array of profile links (conventionally filtered to `type === 'profile'`). Non-profile links are not filtered out by this function — but since it operates on username strings, passing mixed link types is harmless.
+</ParamField>
+
+### Return Value
+
+A new `ExtractedGitLink[]` with duplicate usernames removed. The first occurrence of each username is preserved; later duplicates are dropped. The original array is not mutated.
+
+### How It Works
+
+The function maintains a `Set<string>` of lowercased usernames seen so far. For each profile, if `profile.username.toLowerCase()` is not in the set, the profile is added to the output and the username is recorded. If it is already in the set, the profile is discarded.
+
+This means `JohnDoe`, `johndoe`, and `JOHNDOE` are all treated as the same identity, and only the first one encountered in the input is kept.
+
+### Usage Example
+
+```typescript
+import { dedupeProfilesByUsername, parseGitLink } from '@clyrisai/gitresolve';
+import type { ExtractedGitLink } from '@clyrisai/gitresolve';
+
+// A portfolio page that links the same GitHub profile multiple times
+// (e.g. once in the nav, once in the footer, once in the about section)
+const rawProfiles = [
+  'https://github.com/JaneDoe',
+  'https://github.com/janedoe',
+  'https://github.com/janedoe',
+  'https://gitlab.com/janedoe',  // same username, different provider
+].map(url => parseGitLink(url))
+ .filter(Boolean) as ExtractedGitLink[];
+
+const unique = dedupeProfilesByUsername(rawProfiles);
+
+console.log(unique.length);                  // 1 — all share username 'janedoe'
+console.log(unique[0].url);                  // 'https://github.com/JaneDoe' (first seen)
+```
+
+<Note>
+  `dedupeProfilesByUsername` is used internally by `resolveOwnerAndCategorize` before it evaluates Case 1 (single profile) and Case 2 (multiple profiles). You rarely need to call it directly unless you are building a custom aggregation step outside the standard resolution pipeline.
+</Note>

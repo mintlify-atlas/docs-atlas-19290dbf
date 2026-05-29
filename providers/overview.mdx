@@ -1,0 +1,75 @@
+---
+title: "Browser Providers: Fetch, Puppeteer, and Browserless"
+sidebarTitle: "Overview"
+description: "GitResolve supports three browser providers for fetching portfolio pages. Choose between native fetch, Puppeteer, or Browserless based on your environment."
+---
+
+GitResolve needs to fetch the content of portfolio pages, resume URLs, and profile links before it can extract git profiles and repositories. Because different sites are built differently — some as plain static HTML, others as JavaScript-heavy single-page applications — GitResolve ships three interchangeable browser providers, each suited to a different environment and use case. You can let GitResolve pick the best available provider automatically, pin one explicitly, or control selection via an environment variable.
+
+## Comparison
+
+| Provider | Requires | JS Rendering | Best For |
+|---|---|---|---|
+| `fetch` | Nothing (Node 18+) | ❌ None | Static sites, fallback, always works |
+| `puppeteer` | `npm install puppeteer` | ✅ Full | SPAs, JS-heavy portfolio sites |
+| `browserless` | Docker container | ✅ Full | Server environments, CI/CD |
+
+## Auto-Detection
+
+When no provider is specified, GitResolve walks a priority chain and uses the first provider that reports itself as available:
+
+<Steps>
+  <Step title="Puppeteer">
+    Checked first. Available if the `puppeteer` package is installed in the current project.
+  </Step>
+  <Step title="Browserless">
+    Checked second. Available if a Browserless container is reachable at `BROWSERLESS_URL` (default: `http://localhost:3000`).
+  </Step>
+  <Step title="Fetch">
+    Always available. Used as the guaranteed fallback when neither of the above is detected.
+  </Step>
+</Steps>
+
+## Forcing a Provider
+
+### Via environment variable
+
+Set `BROWSER_PROVIDER` to pin a provider for every run without touching your code:
+
+```bash
+BROWSER_PROVIDER=puppeteer gitresolve https://janedoe.dev
+BROWSER_PROVIDER=fetch gitresolve https://janedoe.dev
+```
+
+### Via `createProvider()`
+
+Use the `createProvider` factory in your application code to select a provider programmatically:
+
+```typescript
+import { createProvider } from '@clyrisai/gitresolve';
+
+// Auto-detect best available provider
+const provider = await createProvider();
+
+// Force a specific provider
+const provider = await createProvider('puppeteer');
+const provider = await createProvider('fetch');
+```
+
+<Note>
+  If you request a specific provider that is not available (e.g., `'puppeteer'` without the package installed), `createProvider` throws an error immediately rather than silently falling back. This makes misconfigured environments fail loudly.
+</Note>
+
+## Provider Pages
+
+<CardGroup cols={3}>
+  <Card title="Fetch" icon="bolt" href="/providers/fetch">
+    Zero-dependency, static HTML only. The always-available fallback for any Node 18+ environment.
+  </Card>
+  <Card title="Puppeteer" icon="browser" href="/providers/puppeteer">
+    Full headless Chromium rendering for JavaScript-heavy SPAs and dynamic portfolio sites.
+  </Card>
+  <Card title="Browserless" icon="docker" href="/providers/browserless">
+    Remote headless browser via Docker — no local browser binary required.
+  </Card>
+</CardGroup>

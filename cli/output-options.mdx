@@ -1,0 +1,110 @@
+---
+title: "GitResolve Output Modes: JSON, Files, and Terminal Display"
+sidebarTitle: "Output Options"
+description: "GitResolve can pretty-print results to the terminal, dump raw JSON to stdout for piping, or write per-candidate JSON files to an output directory."
+---
+
+GitResolve supports three output modes that can be combined to fit any workflow: a live ANSI-colored terminal display for interactive use, raw JSON piped to stdout for scripting and downstream tools, and structured per-candidate files written to disk for storage and further processing. All three modes work with both single-URL and batch invocations.
+
+## Output Modes
+
+### Terminal Display (Default)
+
+When neither `--json` nor `--output-dir` is specified, GitResolve prints a formatted, ANSI-colored table to the terminal as each candidate is resolved. Each row includes the candidate's owner handle, confidence level, count of owned repositories, contribution links, and any external references found. A summary line is printed at the end of every batch run.
+
+```bash
+gitresolve --all
+```
+
+### JSON to Stdout (`--json`)
+
+The `--json` flag suppresses all terminal UI and writes a raw JSON array to stdout. Every element of the array is an `AggregatedResult` object. This mode is ideal for piping into `jq`, a database loader, or any other tool that consumes JSON from stdin.
+
+```bash
+gitresolve --all --json
+```
+
+### Output Directory (`--output-dir <dir>`)
+
+The `--output-dir` flag writes one JSON file per candidate to disk. Resolved candidates (those with an identified git username) are placed under `<dir>/resolved/<username>.json`. Candidates that could not be linked to any git profile are placed under `<dir>/unresolved/<name>.json`.
+
+```bash
+gitresolve --all --output-dir results/
+```
+
+`--json` and `--output-dir` can be combined: files are written to disk **and** the JSON array is printed to stdout.
+
+## Example Commands
+
+```bash
+# Pretty terminal output (default)
+gitresolve --all
+
+# JSON to stdout
+gitresolve --all --json
+
+# Pipe to jq
+gitresolve --all --json | jq '.[].ownerProfile'
+
+# Save to directory
+gitresolve --all --output-dir results/
+
+# JSON + directory (both)
+gitresolve --all --json --output-dir results/
+```
+
+## Output Directory Structure
+
+When `--output-dir results/` is used, GitResolve creates the following layout:
+
+```
+results/
+├── resolved/
+│   ├── janedoe.json
+│   └── johndoe.json
+└── unresolved/
+    └── unknown_resume_1.json
+```
+
+Each file under `resolved/` is named after the candidate's lowercase git username. Files under `unresolved/` are given a generated name derived from the source file or URL.
+
+## AggregatedResult JSON Shape
+
+Every file written to `resolved/` (and every element of the `--json` array) follows the `AggregatedResult` schema:
+
+```json
+{
+  "candidateUsername": "janedoe",
+  "sources": ["https://janedoe.dev", "./data/resumes/janedoe.pdf"],
+  "sourceTypes": ["portfolio", "resume_file"],
+  "ownerProfile": {
+    "url": "https://github.com/janedoe",
+    "provider": "github",
+    "type": "profile",
+    "username": "janedoe"
+  },
+  "confidence": "high",
+  "ownedRepos": [],
+  "contributions": [],
+  "externalRepos": [],
+  "allLinks": [],
+  "warnings": []
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `candidateUsername` | Resolved git username, or `null` if unresolved |
+| `sources` | All input URLs or file paths that contributed to this candidate |
+| `sourceTypes` | Classifier label for each corresponding source |
+| `ownerProfile` | The candidate's primary git profile (`url`, `provider`, `type`, `username`) |
+| `confidence` | Resolution confidence: `high`, `medium`, or `low` |
+| `ownedRepos` | Repositories attributed to the candidate |
+| `contributions` | PR and issue links where the candidate is a contributor |
+| `externalRepos` | Repos referenced but not owned by the candidate |
+| `allLinks` | Every git URL extracted across all sources |
+| `warnings` | Non-fatal issues encountered during resolution |
+
+<Tip>
+  At the end of every batch run, GitResolve prints a summary line to the terminal showing the total number of candidates processed, how many were successfully resolved, and how many could not be linked to a git profile — even when `--output-dir` suppresses the per-candidate output rows. Use this to quickly spot CSV rows or PDFs that need attention.
+</Tip>

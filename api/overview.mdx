@@ -1,0 +1,88 @@
+---
+title: "GitResolve Programmatic API Reference"
+sidebarTitle: "Overview"
+description: "Import @clyrisai/gitresolve directly into your Node.js or Bun backend to resolve candidate profiles, scrape portfolios, and parse resumes programmatically."
+---
+
+The `@clyrisai/gitresolve` programmatic API is a first-class alternative to the CLI, designed for backend pipelines that need to resolve candidate portfolios, resume PDFs, and raw URLs into structured GitHub, GitLab, and Bitbucket profiles. Every capability exposed by the CLI is available as a named export, giving you full control over provider selection, error handling, and result processing in your own code.
+
+## Installation
+
+```bash
+npm install @clyrisai/gitresolve
+```
+
+## Canonical Integration Pattern
+
+The following example shows the standard way to scrape a candidate portfolio and parse a resume PDF in a single session, sharing one browser provider between both operations.
+
+```typescript
+import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresolve';
+
+const provider = await createProvider(); // auto-selects best available
+
+try {
+  // Scrape a portfolio
+  const portfolio = await scrapePortfolio('https://janedoe.dev', provider);
+  console.log('Owner:', portfolio.ownerProfile?.username);
+  console.log('Confidence:', portfolio.confidence);
+  console.log('Owned repos:', portfolio.ownedRepos.length);
+  console.log('Contributions:', portfolio.contributions.length);
+
+  // Parse a resume PDF
+  const resume = await parseResume('./resumes/janedoe.pdf');
+  console.log('Found links:', resume.allLinks.length);
+} finally {
+  await provider.cleanup();
+}
+```
+
+<Note>
+  Always call `provider.cleanup()` in a `finally` block. Skipping it can leave headless browser processes or open connections running in the background.
+</Note>
+
+## All Exports
+
+Every public export is organized below by functional category. All TypeScript types are bundled with the package — no separate `@types/` installation is needed.
+
+| Export | Category | Description |
+|---|---|---|
+| `classifyInput` | Classifier | Determine input type |
+| `parseRepoUrl` | Classifier | Parse and validate a repo URL |
+| `parseGitLink` | Classifier | Extract a typed git link from a URL |
+| `extractGitUrlsFromText` | Classifier | Find all git URLs in raw text |
+| `isGitProviderUrl` | Classifier | Check if a URL is from GitHub/GitLab/Bitbucket |
+| `scrapePortfolio` | Scraper | Scrape a portfolio/profile page |
+| `extractLinksFromHtml` | Scraper | Extract all links from HTML |
+| `parseResume` | Resume | Parse a resume PDF for git links |
+| `resolveOwnerAndCategorize` | Disambiguator | Resolve ownership from extracted links |
+| `dedupeProfilesByUsername` | Disambiguator | Deduplicate profile links by username |
+| `createProvider` | Browser | Create a browser provider instance |
+| `FetchProvider` | Browser | Native fetch provider class |
+| `PuppeteerProvider` | Browser | Puppeteer headless browser class |
+| `BrowserlessProvider` | Browser | Browserless REST API class |
+| `GIT_HOSTS` | Constants | Map of git hostnames to providers |
+
+<Note>
+  All TypeScript types (`InputType`, `GitProvider`, `ParsedRepo`, `GitLinkType`, `ExtractedGitLink`, `ResolverResult`, `BrowserProvider`, `BrowserProviderOptions`, `ProviderName`) are re-exported directly from `@clyrisai/gitresolve`. No `@types/` package is required.
+</Note>
+
+## Explore the API
+
+<CardGroup cols={2}>
+  <Card title="Classifier" icon="magnifying-glass" href="/api/classify-input">
+    `classifyInput`, `parseRepoUrl`, `parseGitLink`, `extractGitUrlsFromText`, and `isGitProviderUrl` — detect and parse any git-related input string.
+  </Card>
+  <Card title="Portfolio Scraper" icon="globe" href="/api/scrape-portfolio">
+    `scrapePortfolio` and `extractLinksFromHtml` — fetch and parse portfolio pages into structured git link sets.
+  </Card>
+  <Card title="Resume Parser" icon="file-pdf" href="/api/parse-resume">
+    `parseResume` — extract git profile and repo links from PDF resume files.
+  </Card>
+  <Card title="Disambiguator" icon="circle-nodes" href="/api/resolve-owner">
+    `resolveOwnerAndCategorize` and `dedupeProfilesByUsername` — resolve ownership and deduplicate across multiple sources.
+  </Card>
+  <Card title="Browser Providers" icon="browser" href="/api/create-provider">
+    `createProvider`, `FetchProvider`, `PuppeteerProvider`, and `BrowserlessProvider` — control how pages are fetched.
+  </Card>
+</CardGroup>
