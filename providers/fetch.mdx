@@ -47,8 +47,10 @@ const html = await provider.getPageContent('https://gitlab.com/someone');
 
 ### CLI
 
+To use `FetchProvider` from the command line, set the `BROWSER_PROVIDER` environment variable:
+
 ```bash
-gitresolve resolve resume.pdf --provider fetch
+BROWSER_PROVIDER=fetch gitresolve resolve resume.pdf
 ```
 
 ## Options

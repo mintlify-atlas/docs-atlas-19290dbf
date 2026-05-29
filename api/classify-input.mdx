@@ -204,7 +204,7 @@ parseRepoUrl('https://example.com/owner/repo');
 
 ## `parseGitLink`
 
-Classifies a raw URL from any of the six recognised git provider hostnames into a typed `ExtractedGitLink`. Unlike `parseRepoUrl`, this function also handles profile pages, gists, PRs, issues, and the `www.` subdomain variants.
+Classifies a raw URL from any of the six recognised git provider hostnames into a typed `ExtractedGitLink`. Unlike `parseRepoUrl`, this function also handles profile pages, PRs, issues, and the `www.` subdomain variants. Note that `gist.github.com` is not in `GIT_HOSTS`, so gist subdomain URLs return `null`.
 
 ```typescript
 function parseGitLink(rawUrl: string): ExtractedGitLink | null
@@ -221,7 +221,7 @@ function parseGitLink(rawUrl: string): ExtractedGitLink | null
 An `ExtractedGitLink` object, or `null` when the URL should be discarded.
 
 <ResponseField name="url" type="string">
-  For repo links this is the `normalized` canonical URL from `parseRepoUrl`. For PR/issue links this is the original `rawUrl` to preserve the exact contribution reference. For profile and gist links this is `rawUrl` as-is.
+  For repo links this is the `normalized` canonical URL from `parseRepoUrl`. For PR/issue links this is the original `rawUrl` to preserve the exact contribution reference. For profile links this is `rawUrl` as-is.
 </ResponseField>
 <ResponseField name="provider" type="'github' | 'gitlab' | 'bitbucket'">
   Resolved from the hostname via `GIT_HOSTS`.
@@ -230,7 +230,7 @@ An `ExtractedGitLink` object, or `null` when the URL should be discarded.
   The classification result. See the table below.
 </ResponseField>
 <ResponseField name="username" type="string">
-  The extracted owner username (first path segment, or second segment for gists on `gist.github.com`).
+  The extracted owner username. For most link types this is the first path segment. For `"gist"` type links (matched when the first path segment is literally `gist` on `github.com`), the second path segment is used.
 </ResponseField>
 <ResponseField name="repo" type="string | undefined">
   Present when `type` is `'repo'`, `'pull_request'`, or `'issue'`.
@@ -243,7 +243,7 @@ An `ExtractedGitLink` object, or `null` when the URL should be discarded.
 
 | `type` result | Condition |
 |---|---|
-| `"gist"` | Host is `gist.github.com` or first path segment is `gist` |
+| `"gist"` | First path segment is literally `gist` (note: `gist.github.com` is **not** in `GIT_HOSTS` — URLs on that subdomain fail the `isGitProviderUrl` check and return `null`) |
 | `"profile"` | Only one path segment present; or second segment is a GitHub profile tab (`repositories`, `stars`, `followers`, `following`); or GitLab second segment is `-` |
 | `"pull_request"` | `parseRepoUrl` returns a `contribution` of type `pull_request` |
 | `"issue"` | `parseRepoUrl` returns a `contribution` of type `issue` |
@@ -272,9 +272,8 @@ parseGitLink('https://github.com/torvalds');
 parseGitLink('https://github.com/vercel/next.js');
 // { url: 'https://github.com/vercel/next.js', provider: 'github', type: 'repo', username: 'vercel', repo: 'next.js' }
 
-// Gist
-parseGitLink('https://gist.github.com/sindresorhus/abc123');
-// { url: '...', provider: 'github', type: 'gist', username: 'sindresorhus' }
+// gist.github.com is NOT in GIT_HOSTS — returns null
+parseGitLink('https://gist.github.com/sindresorhus/abc123'); // null
 
 // Pull request
 parseGitLink('https://github.com/facebook/react/pull/28987');

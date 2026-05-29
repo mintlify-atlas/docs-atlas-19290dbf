@@ -15,7 +15,14 @@ function resolveOwnerAndCategorize(
   links: ExtractedGitLink[],
   sourceContext?: string,
   knownOwnerProfile?: ExtractedGitLink
-): OwnerResolution
+): {
+  ownerProfile: ExtractedGitLink | null;
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  ownedRepos: ExtractedGitLink[];
+  contributions: ExtractedGitLink[];
+  externalRepos: ExtractedGitLink[];
+  warnings: string[];
+}
 ```
 
 ### Parameters
@@ -34,7 +41,7 @@ function resolveOwnerAndCategorize(
 
 ### Returns
 
-An `OwnerResolution` object:
+An object with the following shape. The underlying `OwnerResolution` interface is internal to the library — it is **not** exported from `@clyrisai/gitresolve` and cannot be imported by name. Use the field descriptions below as your type reference.
 
 <ResponseField name="ownerProfile" type="ExtractedGitLink | null">
   The resolved candidate git profile, or `null` when no owner could be determined (Case 4).

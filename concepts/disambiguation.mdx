@@ -1,7 +1,7 @@
 ---
 title: "Disambiguation: Identifying the Candidate's Git Identity"
 sidebarTitle: "Disambiguation"
-description: "Understand how GitResolve's four-case algorithm resolves ambiguous link sets into a single owner profile with a confidence score."
+description: "Understand how GitResolve's resolveOwnerAndCategorize algorithm resolves ambiguous link sets into a single owner profile with a confidence score."
 ---
 
 A developer's portfolio page typically contains far more git links than just their own profile and repositories. Project pages link to upstream libraries, open-source work references maintainers, collaboration sections mention teammates, and blog posts embed links to third-party repos. When GitResolve scrapes a portfolio or parses a resume PDF, it collects all of these links together — and then must figure out which one of them is actually the candidate. The `resolveOwnerAndCategorize` function solves this problem by cross-referencing profile links against repo links and applying a four-case decision algorithm that produces both an `ownerProfile` and a `confidence` level explaining how certain the resolution is.
@@ -90,7 +90,7 @@ resolveOwnerAndCategorize(links, "portfolio", knownOwnerProfile);
 | Level | Meaning | Typical source |
 |---|---|---|
 | `high` | Owner identity is certain | Direct `git_profile`/`repo_url` input, or one clear profile found, or one profile dominates repos |
-| `medium` | Owner identity is a strong inference but not guaranteed | Owner inferred from repo majority; no explicit profile link present |
+| `medium` | Owner identity is a strong inference but not guaranteed | Multiple profiles tied for top repo count (Case 2), or owner inferred from repo-username frequency with no explicit profile link (Case 3) |
 | `low` | Owner identity is a best guess | Multiple tied profiles or repos; no supporting evidence for a clear winner |
 | `none` | Owner identity could not be determined | No git links found at all, or LinkedIn-only source |
 
@@ -113,6 +113,10 @@ Profile links and gist links are not placed in any bucket — they appear only i
 ## Calling resolveOwnerAndCategorize directly
 
 While the function is called internally by `scrapePortfolio` and `parseResume`, you can invoke it directly when you have a pre-built set of `ExtractedGitLink` objects.
+
+<Note>
+  The return type of `resolveOwnerAndCategorize` is the internal `OwnerResolution` interface, which is **not exported** from `@clyrisai/gitresolve`. TypeScript will infer the type structurally — you can access all fields on the return value without importing the type name.
+</Note>
 
 ```typescript
 import { resolveOwnerAndCategorize } from "@clyrisai/gitresolve";

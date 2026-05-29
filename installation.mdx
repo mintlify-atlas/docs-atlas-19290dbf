@@ -85,7 +85,7 @@ import { createProvider, scrapePortfolio, parseResume } from '@clyrisai/gitresol
 
 TypeScript types are included in the package at `./dist/index.d.ts`. No `@types/gitresolve` package is needed — types work out of the box after install.
 
-The main types you'll use are exported directly from `@clyrisai/gitresolve`:
+All types, values, and functions exported from `@clyrisai/gitresolve`:
 
 ```typescript
 import type {
@@ -98,6 +98,33 @@ import type {
   BrowserProvider,
   BrowserProviderOptions,
   ProviderName,
+} from '@clyrisai/gitresolve';
+
+import {
+  // Constants
+  GIT_HOSTS,
+
+  // Classifier utilities
+  classifyInput,
+  parseRepoUrl,
+  parseGitLink,
+  extractGitUrlsFromText,
+  isGitProviderUrl,
+
+  // Scraping & parsing
+  scrapePortfolio,
+  extractLinksFromHtml,
+  parseResume,
+
+  // Disambiguation
+  resolveOwnerAndCategorize,
+  dedupeProfilesByUsername,
+
+  // Browser providers
+  createProvider,
+  FetchProvider,
+  BrowserlessProvider,
+  PuppeteerProvider,
 } from '@clyrisai/gitresolve';
 ```
 
@@ -123,7 +150,7 @@ import { createProvider } from '@clyrisai/gitresolve';
 const provider = await createProvider('fetch');
 
 // Or let GitResolve auto-select (puppeteer → browserless → fetch)
-const provider = await createProvider();
+const autoProvider = await createProvider();
 ```
 
 See the [Browser Providers](/providers/overview) guide for Browserless Docker setup instructions.
@@ -161,7 +188,7 @@ gitresolve --version
 gitresolve --help
 ```
 
-You should see the version number (`0.2.1`) and the full usage output listing all available flags and options.
+You should see the version number (`0.1.0`) and the full usage output listing all available flags and options.
 
 <Warning>
   If `gitresolve` is not found after a global install, your npm global bin directory may not be on your `PATH`. Run `npm bin -g` to find the directory and add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).

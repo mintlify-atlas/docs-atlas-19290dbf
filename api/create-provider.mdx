@@ -1,7 +1,7 @@
 ---
 title: "createProvider — Browser Provider Factory & Interface"
 sidebarTitle: "createProvider"
-description: "Auto-detect or explicitly select a BrowserProvider for portfolio scraping. Reference for FetchProvider, PuppeteerProvider, BrowserlessProvider, and the BrowserProvider interface."
+description: "Auto-detect or explicitly select a BrowserProvider for scraping. Reference for FetchProvider, PuppeteerProvider, BrowserlessProvider, and BrowserProvider."
 ---
 
 GitResolve separates page-fetching concerns from link extraction through the `BrowserProvider` interface. This lets you choose between a lightweight plain-`fetch` approach and a full headless browser without changing any other code. The `createProvider` factory handles automatic detection so most applications never need to instantiate a provider class directly.
@@ -26,7 +26,7 @@ async function createProvider(preferred?: ProviderName): Promise<BrowserProvider
 
 ### Resolution order
 
-1. **`preferred` argument** — if supplied, that provider is attempted. Throws `Error('Requested provider '${preferred}' is not available')` if unavailable.
+1. **`preferred` argument** — if supplied, that provider is attempted. Throws `Error("Requested provider '${preferred}' is not available")` if unavailable.
 2. **`BROWSER_PROVIDER` environment variable** — if set to a valid `ProviderName`, behaves as if `preferred` was passed (including the throw-on-unavailable behaviour).
 3. **Automatic fallback chain** — `puppeteer` → `browserless` → `fetch`. The first provider that reports `isAvailable() === true` is returned.
 
@@ -72,7 +72,7 @@ import { createProvider } from '@clyrisai/gitresolve';
 const provider = await createProvider('fetch');
 ```
 
-```typescript Via environment variable
+```bash Via environment variable
 # .env or shell
 export BROWSER_PROVIDER=browserless
 export BROWSERLESS_URL=http://localhost:3000

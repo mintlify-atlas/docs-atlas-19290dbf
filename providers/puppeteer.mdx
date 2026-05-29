@@ -1,5 +1,5 @@
 ---
-title: "Puppeteer Provider — Headless Chromium Rendering | GitResolve"
+title: "Puppeteer Provider — JavaScript Rendering | GitResolve"
 sidebarTitle: "Puppeteer"
 description: "PuppeteerProvider launches headless Chromium to fully execute JavaScript, making it the most compatible option for SPAs and dynamic portfolio sites."
 ---
@@ -14,14 +14,14 @@ Puppeteer is listed as a direct dependency of `@clyrisai/gitresolve` and is down
 npm install @clyrisai/gitresolve
 ```
 
-For a **global CLI install** the bundled Puppeteer may not be on the path. If `gitresolve --provider puppeteer` reports that the provider is unavailable, install Puppeteer globally alongside it:
+For a **global CLI install** the bundled Puppeteer may not be on the path. If `BROWSER_PROVIDER=puppeteer gitresolve` reports that the provider is unavailable, install Puppeteer globally alongside it:
 
 ```bash
 npm install -g puppeteer
 ```
 
 <Tip>
-  Set `BROWSER_PROVIDER=puppeteer` in your shell profile to make Puppeteer the default without passing `--provider` every time.
+  Set `BROWSER_PROVIDER=puppeteer` in your shell profile to make Puppeteer the default for every run without touching your code.
 
   ```bash
   export BROWSER_PROVIDER=puppeteer
@@ -63,8 +63,10 @@ try {
 
 ### CLI
 
+To use `PuppeteerProvider` from the command line, set the `BROWSER_PROVIDER` environment variable:
+
 ```bash
-gitresolve resolve resume.pdf --provider puppeteer
+BROWSER_PROVIDER=puppeteer gitresolve resolve resume.pdf
 ```
 
 ## How it works

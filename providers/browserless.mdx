@@ -72,8 +72,10 @@ const html = await provider.getPageContent('https://bitbucket.org/someone');
 
 ### CLI
 
+To use `BrowserlessProvider` from the command line, set the `BROWSER_PROVIDER` and `BROWSERLESS_URL` environment variables:
+
 ```bash
-gitresolve resolve resume.pdf --provider browserless --browserless-url http://browserless:3000
+BROWSERLESS_URL=http://browserless:3000 BROWSER_PROVIDER=browserless gitresolve resolve resume.pdf
 ```
 
 ## How it works

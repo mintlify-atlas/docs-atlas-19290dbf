@@ -1,7 +1,7 @@
 ---
 title: "Input Classification: How GitResolve Reads Your Data"
 sidebarTitle: "Input Classification"
-description: "Learn how GitResolve's classifyInput function categorizes every input into one of seven types before processing begins."
+description: "Learn how GitResolve's classifyInput function categorizes every input — file paths, repo URLs, profiles, and more — before processing begins."
 ---
 
 Before GitResolve fetches a single URL or opens a single file, it runs every input through a classification step. This step determines which processing pipeline to invoke — portfolio scraping, PDF parsing, direct profile resolution, or a deliberate skip — so that downstream logic always knows exactly what kind of source it is working with. Getting classification right is essential: sending a resume file path into the portfolio scraper, or treating a bare GitHub profile as a repository URL, would produce empty or incorrect results. `classifyInput` resolves that ambiguity with a fast, deterministic decision before any network or file I/O takes place.
@@ -21,12 +21,12 @@ Every input resolves to one of seven `InputType` values. The table below lists e
 | `unknown` | Anything that cannot be parsed as a URL and is not a recognised file extension | `github.com/janedoe` _(no scheme)_ |
 
 <Note>
-`resume_url` is defined as a distinct `InputType` in the type system but is **not** auto-detected by `classifyInput`. A URL ending in `.pdf` hosted on a non-git domain resolves to `portfolio` through the current classification logic. Use `resume_url` when you are constructing a `ResolverResult` manually or extending the resolver.
+`resume_url` is defined in the `InputType` union but is **never returned by `classifyInput`**. A URL ending in `.pdf` hosted on a non-git domain resolves to `'portfolio'` through the classification algorithm. The CLI assigns `'resume_url'` as the `sourceType` after it has downloaded a remote PDF and is about to hand it off for parsing — this assignment happens outside `classifyInput` entirely.
 </Note>
 
 ## Classification decision flow
 
-`classifyInput` applies rules in strict order and returns as soon as a match is found. Passing through all seven steps without a match is only possible for the `unknown` case.
+`classifyInput` applies rules in strict order and returns as soon as a match is found. Step 7 (`portfolio`) acts as a catch-all for any valid URL that did not match an earlier rule — the only step that returns without a positive match is step 3, which returns `unknown` when the `URL` constructor throws.
 
 <Steps>
   <Step title="Trim whitespace">
@@ -105,7 +105,7 @@ Classification determines which pipeline runs next:
 | `git_profile` | Owner is extracted directly from the URL path. Same high-confidence bypass as `repo_url`. |
 | `portfolio` | Page HTML is fetched via `scrapePortfolio()`, all `href` attributes and inline git URLs are extracted, then disambiguation runs on the full link set. |
 | `resume_file` | The file is read with `parseResume()`, which runs two extraction passes: plain-text extraction via `unpdf` and hyperlink annotation extraction from PDF metadata. Disambiguation then runs on the combined link set. |
-| `resume_url` | Treated as a remote resume document; the response body is processed similarly to `resume_file`. |
+| `resume_url` | Set by the CLI after downloading a remote PDF — not produced by `classifyInput`. The downloaded file is then processed the same way as `resume_file`. |
 | `linkedin` | Flagged and skipped — no request is made (see below). |
 | `unknown` | An error is attached to the result and processing is skipped. |
 

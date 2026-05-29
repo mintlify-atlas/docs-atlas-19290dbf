@@ -1,7 +1,7 @@
 ---
 title: "Result Structure: ResolverResult and AggregatedResult"
 sidebarTitle: "Result Structure"
-description: "Complete field reference for ResolverResult, AggregatedResult, and ExtractedGitLink — the three core output types of GitResolve."
+description: "Complete field-by-field reference for ResolverResult, AggregatedResult, and ExtractedGitLink — the three core output types returned by GitResolve."
 ---
 
 Every resolved source produces a typed output object that captures both what was found and how confident GitResolve is about the result. When you call `scrapePortfolio` or `parseResume` directly, you receive a `ResolverResult` for that single source. When you run the CLI in batch mode across multiple inputs for the same candidate, each candidate's sources are merged into an `AggregatedResult`. Understanding the shape of these objects — including what goes into `warnings`, when `error` appears, and how `ownedRepos` differs from `externalRepos` — lets you build reliable downstream logic on top of GitResolve's output.
@@ -11,13 +11,16 @@ Every resolved source produces a typed output object that captures both what was
 ```typescript
 import type {
   ResolverResult,
-  AggregatedResult,
   ExtractedGitLink,
   InputType,
   GitProvider,
   GitLinkType,
 } from "@clyrisai/gitresolve";
 ```
+
+<Note>
+  `AggregatedResult` is defined in the source type system but is **not exported from the package index**. It is used internally by the CLI when merging multiple sources for a single candidate. You cannot import it directly from `@clyrisai/gitresolve` in your own code.
+</Note>
 
 ---
 
@@ -30,7 +33,7 @@ import type {
 </ResponseField>
 
 <ResponseField name="sourceType" type="InputType" required>
-  The classification assigned by `classifyInput` before processing. One of `'repo_url'`, `'git_profile'`, `'portfolio'`, `'resume_file'`, `'resume_url'`, `'linkedin'`, or `'unknown'`. See [Input Classification](/concepts/input-classification) for the full decision logic.
+  The `InputType` for this source. One of `'repo_url'`, `'git_profile'`, `'portfolio'`, `'resume_file'`, `'resume_url'`, `'linkedin'`, or `'unknown'`. For most sources this is the value returned by `classifyInput`; the CLI sets `'resume_url'` when it downloads a remote PDF before parsing. See [Input Classification](/concepts/input-classification) for the full decision logic.
 </ResponseField>
 
 <ResponseField name="ownerProfile" type="ExtractedGitLink | null" required>
@@ -110,7 +113,11 @@ import type {
 
 ## AggregatedResult
 
-`AggregatedResult` is the output type for CLI batch runs where multiple source inputs (a portfolio URL, a resume PDF, a repo URL) are resolved together for a single candidate. GitResolve merges the individual `ResolverResult` objects, deduplicates links across sources, and picks the highest-confidence owner profile.
+<Warning>
+  `AggregatedResult` is **not exported from the `@clyrisai/gitresolve` package index** and cannot be imported directly. It is an internal type used by the CLI. The field reference below documents its shape for CLI output consumers and contributors only.
+</Warning>
+
+`AggregatedResult` is the output type for CLI batch runs where multiple source inputs (a portfolio URL, a resume PDF, a repo URL) are resolved together for a single candidate. GitResolve merges the individual `ResolverResult` objects, deduplicates links across sources, and picks the highest-confidence owner profile. Note that unlike `ResolverResult`, `AggregatedResult` has no `error` field — errors are captured on individual `ResolverResult` objects before aggregation.
 
 <ResponseField name="candidateUsername" type="string | null" required>
   The final resolved username for this candidate, or `null` if no owner could be determined across any source. Derived from `ownerProfile.username`.
@@ -159,7 +166,7 @@ import type {
 | Level | Meaning |
 |---|---|
 | `high` | The owner was determined with certainty — either from a direct `git_profile`/`repo_url` input, a single unambiguous profile link, or a clear repo-count majority when multiple profiles were present. |
-| `medium` | The owner was inferred rather than directly identified — typically from repo-username frequency when no profile link exists, or from a dominant but not exclusive repo count. |
+| `medium` | The owner was inferred rather than directly identified. In Case 2 (multiple profiles), this means two profiles tied for the highest repo count. In Case 3 (no profiles), this means the owner was inferred from repo-username frequency — either all repos share one username, or one username clearly dominates. |
 | `low` | The owner is a best guess — profiles or repos were found but evidence was tied or contradictory. The first candidate was picked, but downstream code should treat this result with caution. |
 | `none` | No git links were found at all, or the source was a type that cannot be resolved (e.g. `linkedin`). `ownerProfile` is `null`. |
 

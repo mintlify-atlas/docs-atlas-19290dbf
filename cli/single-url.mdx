@@ -1,5 +1,5 @@
 ---
-title: "Process a Single URL or File with GitResolve"
+title: "Process a Single URL or File with the GitResolve CLI"
 sidebarTitle: "Single URL"
 description: "Pass any portfolio, GitHub profile, GitLab URL, repo link, or resume PDF as a positional argument and resolve it to a structured candidate profile."
 ---
@@ -95,7 +95,11 @@ GitResolve fetches the PDF, saves it to a temporary file, and extracts both the 
 gitresolve ./resumes/janedoe.pdf
 ```
 
-Local file paths are read directly from disk. The `.pdf` extension prevents URL normalization from prepending `https://`.
+Local file paths are read directly from disk. The `.pdf` extension — or the leading `./`, `/`, or `~/` — prevents URL normalization from prepending `https://`.
+
+<Note>
+  To process a directory of local PDF resumes, use `--resumes` or `--resumes-dir` batch mode instead of the single-URL argument. See [Batch Processing](/cli/batch-processing) for details.
+</Note>
 
 ## The `--type` Flag
 
@@ -120,19 +124,19 @@ When you pass a URL, GitResolve runs through the following steps before any netw
     The raw input string is checked for a protocol prefix, file extension, and local path markers. A `https://` prefix is prepended if needed.
   </Step>
   <Step title="Classify input type">
-    The classifier checks the hostname against known Git providers (`github.com`, `gitlab.com`, `bitbucket.org`), runs a repo-URL parser to distinguish profile URLs from repo URLs, and flags local file paths with document extensions as resume files. Any other valid URL is classified as a `portfolio`.
+    The classifier checks the hostname against known Git providers (`github.com`, `gitlab.com`, `bitbucket.org`), runs a repo-URL parser to distinguish profile URLs from repo URLs, and flags URLs with document extensions as resume inputs. Any other valid URL is classified as a `portfolio`.
   </Step>
   <Step title="Select processing strategy">
-    Resume files and remote resume PDFs are routed to the PDF parser. Portfolio pages, Git profiles, and repo URLs are routed to the portfolio scraper with the appropriate browser provider.
+    Resume URLs are routed to the PDF fetcher and parser. Portfolio pages, Git profiles, and repo URLs are routed to the portfolio scraper with the appropriate browser provider.
   </Step>
   <Step title="Scrape or parse">
-    For portfolio and Git URLs, the page is fetched (via `fetch`, Puppeteer, or Browserless) and all Git URLs are extracted from the HTML. For PDFs, text content and hyperlink annotations are extracted.
+    For portfolio and Git URLs, the page is fetched (via `fetch`, Puppeteer, or Browserless) and all Git URLs are extracted from the HTML. For remote resume PDFs, the file is downloaded to a temporary path and text content and hyperlink annotations are extracted.
   </Step>
   <Step title="Disambiguate owner">
     All discovered links are analysed to determine which username appears most frequently as an owner. That username becomes the `ownerProfile`, and links are sorted into `ownedRepos`, `contributions`, and `externalRepos`.
   </Step>
   <Step title="Return result">
-    A structured `ResolverResult` object is printed to the terminal (or emitted as JSON if `--json` is set).
+    A structured `AggregatedResult` object is printed to the terminal (or emitted as JSON if `--json` is set).
   </Step>
 </Steps>
 
@@ -182,10 +186,24 @@ gitresolve https://github.com/janedoe --json
   ```
 </Tip>
 
-## LinkedIn URLs
+## Unresolvable Input Types
 
-LinkedIn URLs are recognized by the classifier and returned with an `InputType` of `linkedin`. However, GitResolve **does not scrape LinkedIn pages** — the result will have `confidence: "none"` and a warning explaining that LinkedIn cannot be resolved. Use a portfolio URL or direct Git profile link instead.
+Some input types are recognized by the classifier but cannot be resolved to a Git profile. In these cases the result will always have `confidence: "none"`, `ownerProfile: null`, and a human-readable explanation in the `warnings` array.
+
+### LinkedIn URLs
+
+LinkedIn URLs are classified with an `InputType` of `linkedin`. GitResolve **does not scrape LinkedIn pages** — passing a LinkedIn URL returns a result with `confidence: "none"` and a warning explaining that LinkedIn cannot be resolved. Use a portfolio URL or a direct Git profile link instead.
 
 <Note>
   LinkedIn classification exists to give you a clear warning rather than a silent failure. If a candidate's only provided link is LinkedIn, you will see the URL echoed back with an explanatory message in `warnings`.
 </Note>
+
+### Unknown Input Types
+
+If the classifier cannot determine a URL's type — for example, a short-link redirect or an unrecognized hostname that is neither a known Git provider nor a portfolio-style domain — the input is classified as `unknown`. Like `linkedin`, an `unknown` input type cannot be resolved: the result will have `confidence: "none"` and a warning of the form `"Input classified as 'unknown' — cannot resolve"`.
+
+```bash
+# Example: an unrecognized short-link
+gitresolve https://bit.ly/candidate-profile
+# → confidence: "none", warnings: ["Input classified as 'unknown' — cannot resolve"]
+```

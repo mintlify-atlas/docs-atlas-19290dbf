@@ -69,13 +69,17 @@ async function scrapePortfolio(
 
 ### Provider warning messages
 
-The `warnings` array always contains exactly one provider message:
+When the page fetch succeeds, one provider message is prepended to `warnings`:
 
 | Provider | Warning text |
 |---|---|
 | `FetchProvider` | `"Used fetch provider (SPA rendering layer like Puppeteer/Browserless is missing)"` |
 | `PuppeteerProvider` | `"Used puppeteer provider for page content"` |
 | `BrowserlessProvider` | `"Used browserless provider for page content"` |
+
+<Note>
+  The provider warning is added only after `provider.getPageContent()` returns successfully. If the fetch throws, `result.error` is set and no provider warning is added to `warnings`.
+</Note>
 
 ### How it works
 

@@ -1,7 +1,7 @@
 ---
-title: "Browser Providers Overview — GitResolve"
+title: "GitResolve Browser Providers: Fetch, Puppeteer & Browserless"
 sidebarTitle: "Overview"
-description: "Learn how GitResolve browser providers work, compare all three options, and choose the right one for your environment."
+description: "Compare GitResolve's three browser providers — fetch, Puppeteer, and Browserless — and learn how auto-detection and the BROWSER_PROVIDER variable work."
 ---
 
 GitResolve fetches profile pages from GitHub, GitLab, and Bitbucket before extracting structured data from them. Because many modern portfolio sites are single-page applications built with React, Vue, or similar frameworks, a plain HTTP download would return an empty shell — the real content only appears after JavaScript runs. Browser providers are the pluggable layer that decides *how* a page is retrieved, ranging from a lightweight native-fetch call all the way to a full headless Chromium instance.
@@ -24,7 +24,7 @@ When no provider is specified, `createProvider()` walks a fixed resolution chain
 
 <Steps>
   <Step title="Check the explicit argument">
-    If you called `createProvider('puppeteer')` (or passed `--provider puppeteer` on the CLI), GitResolve attempts to use exactly that provider. If it is not available, an error is thrown immediately — there is no silent fallback to a different provider.
+    If you called `createProvider('puppeteer')`, GitResolve attempts to use exactly that provider. If it is not available, an error is thrown immediately — there is no silent fallback to a different provider.
   </Step>
   <Step title="Check the BROWSER_PROVIDER environment variable">
     If no argument was passed, GitResolve reads `process.env.BROWSER_PROVIDER`. If the variable is set, it behaves as though you had passed that value explicitly, including the hard failure if the provider is unavailable.
@@ -42,7 +42,7 @@ When no provider is specified, `createProvider()` walks a fixed resolution chain
 
 ## Forcing a specific provider
 
-There are three ways to override auto-detection.
+There are two ways to override auto-detection.
 
 **Environment variable** — set once, applies to every run in that shell session:
 
@@ -61,12 +61,6 @@ const provider = await createProvider('puppeteer');
 <Warning>
   If the requested provider is not available, `createProvider` throws `Error: Requested provider 'puppeteer' is not available`. It will **not** silently fall back to another provider when a preference is expressed.
 </Warning>
-
-**CLI flag** — pass `--provider` on any command:
-
-```bash
-gitresolve resolve resume.pdf --provider puppeteer
-```
 
 ## Choose your provider
 
